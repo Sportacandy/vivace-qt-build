@@ -872,6 +872,9 @@
         "-cmake-generator",
         "Ninja Multi-Config"
       ],
+      "skip": [
+        "qtopenapi"
+      ],
       "module_cmake_args": {
         "qtwebengine": [
           "-DFEATURE_qtpdf_build=OFF",
@@ -972,7 +975,8 @@
       ],
       "module_configure_args": [],
       "skip": [
-        "qtwebengine"
+        "qtwebengine",
+        "qtopenapi"
       ],
       "post_install": {
         "qtmultimedia": [
@@ -1074,7 +1078,8 @@
       "module_configure_args": [],
       "skip": [
         "qtwebengine",
-        "qtactiveqt"
+        "qtactiveqt",
+        "qtopenapi"
       ],
       "env": {
         "LANG": "C.UTF-8"
@@ -1157,7 +1162,8 @@
       "module_configure_args": [],
       "skip": [
         "qtwebengine",
-        "qtactiveqt"
+        "qtactiveqt",
+        "qtopenapi"
       ],
       "env": {
         "LANG": "C.UTF-8"
@@ -1231,7 +1237,8 @@
       ],
       "module_configure_args": [],
       "skip": [
-        "qtactiveqt"
+        "qtactiveqt",
+        "qtopenapi"
       ],
       "post_install": {
         "qtmultimedia": [
@@ -1291,7 +1298,8 @@
       "module_configure_args": [],
       "skip": [
         "qtactiveqt",
-        "qtwayland"
+        "qtwayland",
+        "qtopenapi"
       ],
       "env": {
         "LANG": "C.UTF-8",
