@@ -407,9 +407,11 @@ TAIL = r'''
   # The only job with a write token. It runs on a new GitHub-hosted machine
   # and runs no code from the build: it only downloads the archive, uploads
   # it to the release, and deletes the per-job states.
+  # !cancelled(): without a status function, GitHub adds success(), which is
+  # false when any earlier job was skipped (the unused stages always are).
   publish:
     needs: [package]
-    if: needs.package.result == 'success'
+    if: ${{{{ !cancelled() && needs.package.result == 'success' }}}}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
