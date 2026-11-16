@@ -1,0 +1,206 @@
+# Builds the LGPL FFmpeg of the selected kits, runs its checks, and uploads
+# the archives and their sources to a GitHub release.
+#
+# The FFmpeg is the one that the kits of build.yml contain: the same recipe
+# (toolchains.ffmpeg in versions/<qt_version>.json), the same build
+# (.github/actions/build-ffmpeg), and the same cache key.
+#
+# The runners come from the repository variables of build.yml:
+#   QTCI_RUNNER_<KIT>, QTCI_RUNNER_WINDOWS, QTCI_RUNNER_LINUX, QTCI_RUNNER_MACOS
+# A runner value can be a label ("windows-2022") or a JSON array of labels.
+
+name: Build FFmpeg
+
+on:
+  workflow_dispatch:
+    inputs:
+      qt_version:
+        description: Qt version whose FFmpeg recipe to use (a file in versions/ must exist)
+        default: "6.12.0"
+        required: true
+      kits:
+        description: 'Comma-separated kits without spaces, or "all": msvc2022_64,mingw1310_64,gcc_64,macos'
+        default: all
+        required: true
+      release_tag:
+        description: Upload the archives to this GitHub release (created if missing). Empty means artifacts only.
+        default: ""
+
+# Read-only by default. Only publish writes: it creates the release.
+permissions:
+  contents: read
+
+# Two runs must not upload to the same release at the same time.
+concurrency:
+  group: ffmpeg-${{ inputs.release_tag || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  # Checks the inputs and makes the job matrix.
+  select:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Check the inputs
+        id: select
+        env:
+          QT_VERSION: ${{ inputs.qt_version }}
+          KITS: ${{ inputs.kits }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RUNNER_MSVC2022_64: ${{ vars.QTCI_RUNNER_MSVC2022_64 || vars.QTCI_RUNNER_WINDOWS || 'windows-2022' }}
+          RUNNER_MINGW1310_64: ${{ vars.QTCI_RUNNER_MINGW1310_64 || vars.QTCI_RUNNER_WINDOWS || 'windows-2022' }}
+          RUNNER_GCC_64: ${{ vars.QTCI_RUNNER_GCC_64 || vars.QTCI_RUNNER_LINUX || 'ubuntu-24.04' }}
+          RUNNER_MACOS: ${{ vars.QTCI_RUNNER_MACOS || 'macos-15' }}
+        run: |
+          python - <<'EOF'
+          import json, os, re, sys
+          from pathlib import Path
+
+          def fail(msg):
+              print(f"::error::{msg}")
+              sys.exit(1)
+
+          version = os.environ["QT_VERSION"].strip()
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+              fail(f"qt_version must be a version number, not {version!r}")
+          path = Path("versions") / f"{version}.json"
+          if not path.is_file():
+              fail(f"{path} does not exist")
+          release = json.loads(path.read_text(encoding="utf-8"))["toolchains"]["ffmpeg"]["release"]
+          kits = os.environ["KITS"].strip()
+          selected = list(release) if kits == "all" else [k for k in kits.split(",") if k]
+          unknown = [k for k in selected if k not in release]
+          if unknown or not selected:
+              fail(f"kits must be 'all' or a list of {', '.join(release)}; got {kits!r}")
+          tag = os.environ["RELEASE_TAG"]
+          if tag and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", tag):
+              fail("release_tag must start with a letter or digit and contain only "
+                   "letters, digits, '.', '_', '+', and '-'.")
+          import subprocess
+          if tag and subprocess.run(["git", "check-ref-format", f"refs/tags/{tag}"]).returncode:
+              fail(f"release_tag {tag!r} is not a valid git tag name.")
+
+          def labels(value):
+              value = value.strip()
+              return value if value.startswith("[") else json.dumps(value)
+
+          matrix = {"include": [{"kit": k, "runs_on": labels(os.environ["RUNNER_" + k.upper()])}
+                                for k in selected]}
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write("matrix=" + json.dumps(matrix) + "\n")
+          EOF
+
+  build:
+    needs: select
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+    runs-on: ${{ fromJSON(matrix.runs_on) }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The build runs third-party code (FFmpeg and its parts, pip
+          # packages). Do not leave the job token in .git/config.
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Plan the FFmpeg build
+        id: plan
+        shell: bash
+        env:
+          QT_VERSION: ${{ inputs.qt_version }}
+          KIT: ${{ matrix.kit }}
+        run: python tools/qtci.py plan --qt-version "$QT_VERSION" --kit "$KIT" --state "$RUNNER_TEMP/state"
+
+      - uses: ./.github/actions/build-ffmpeg
+        with:
+          state-dir: ${{ runner.temp }}/state
+          toolchain: ${{ steps.plan.outputs.toolchain }}
+          cache-key: ${{ steps.plan.outputs.ffmpeg_key }}
+          out: ${{ runner.temp }}/ffmpeg
+
+      - name: Make the release files
+        shell: bash
+        run: |
+          # exec: on a cancel, Python gets the signal.
+          exec python tools/qtci.py package-ffmpeg --state "$RUNNER_TEMP/state" \
+            --dir "$RUNNER_TEMP/ffmpeg" --out dist
+
+      - name: Upload the release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-release-${{ matrix.kit }}
+          path: dist
+          overwrite: true
+          compression-level: 0
+          retention-days: 14
+
+  # The only job with a write token. It runs on a new GitHub-hosted machine
+  # and runs no code from the build: it only uploads the release files.
+  publish:
+    needs: build
+    if: inputs.release_tag != '' && needs.build.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Download the release files
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ffmpeg-release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Upload to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          # The select job checked the tag; check it again before gh uses it.
+          if ! [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
+            echo "::error::release_tag has characters that are not allowed."
+            exit 1
+          fi
+          # The release stays a draft until every file is uploaded, so that
+          # nobody sees FFmpeg without its source. A published release that
+          # this run updates becomes a draft for the time of the uploads.
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" != true ]; then
+              gh release edit "$RELEASE_TAG" --draft=true
+            fi
+          else
+            notes="LGPL FFmpeg built by vivace-qt-build. Each archive has its license files in licenses/, and each <archive>-source.tar has the sources and the build scripts. Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            # --target tags the commit that this run built.
+            gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" \
+              --title "FFmpeg ($RELEASE_TAG)" --notes "$notes" \
+              || gh release view "$RELEASE_TAG" > /dev/null
+          fi
+          # Also when the first view failed for another reason than "not found".
+          if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" != true ]; then
+            gh release edit "$RELEASE_TAG" --draft=true
+          fi
+          # The sources first, and only once: a second --clobber upload would
+          # delete the source of a public release for a moment.
+          gh release upload "$RELEASE_TAG" dist/*-source.tar --clobber
+          find dist -maxdepth 1 -type f ! -name '*-source.tar' -print0 |
+            xargs -0 gh release upload "$RELEASE_TAG" --clobber
+          # Also a re-run after a failed upload publishes the draft.
+          if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true ]; then
+            gh release edit "$RELEASE_TAG" --draft=false
+          fi

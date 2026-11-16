@@ -1,0 +1,70 @@
+# Fast checks for every push and pull request. These do not build Qt.
+
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Check that kit.yml matches its generator
+        run: |
+          python tools/gen-kit-workflow.py > "$RUNNER_TEMP/kit.yml"
+          diff -u .github/workflows/kit.yml "$RUNNER_TEMP/kit.yml"
+
+      - name: Lint workflows
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
+
+      - name: Lint shell scripts
+        run: shellcheck tools/*.sh
+
+      - name: Check the Python driver
+        run: python -m py_compile tools/qtci.py tools/gen-kit-workflow.py
+
+      - name: Plan every kit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          for version_file in versions/*.json; do
+            version=$(basename "$version_file" .json)
+            for kit in $(python -c "import json,sys;print(' '.join(json.load(open(sys.argv[1]))['kits']))" "$version_file"); do
+              python tools/qtci.py plan --qt-version "$version" --kit "$kit" --webengine \
+                --state "$RUNNER_TEMP/plan-$version-$kit" > /dev/null
+              # The default stage time must fit every item that stays on
+              # GitHub-hosted runners when QtWebEngine is offloaded.
+              python tools/qtci.py plan --qt-version "$version" --kit "$kit" --webengine \
+                --offload-webengine --stage-minutes 350 \
+                --state "$RUNNER_TEMP/plan-offload-$version-$kit" > /dev/null
+              echo "planned $version $kit"
+            done
+          done
+
+  patches:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Apply the patches to the pinned Qt sources
+        run: |
+          for version_file in versions/*.json; do
+            version=$(basename "$version_file" .json)
+            python tools/qtci.py check-patches --qt-version "$version" --work "$RUNNER_TEMP/check-$version"
+          done

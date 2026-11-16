@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+/dist/
+/state/
+
+# aqtinstall (MinGW setup) writes its log to the working directory.
+aqtinstall.log

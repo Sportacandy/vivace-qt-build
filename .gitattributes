@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.patch -text
+*.bat text eol=crlf
+*.7z binary
+*.zip binary

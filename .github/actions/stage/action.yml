@@ -1,0 +1,196 @@
+name: Run one build stage
+description: >
+  Restores the saved state of a kit, builds the next items until the time
+  budget is used, and saves the state as an artifact for the next job.
+
+inputs:
+  kit:
+    description: Kit name from versions/<qt_version>.json.
+    required: true
+  host:
+    description: windows, linux or macos.
+    required: true
+  toolchain:
+    description: msvc, mingw, android, gcc or clang.
+    required: true
+  webengine:
+    description: "true if QtWebEngine is built."
+    required: false
+    default: "false"
+  host-kit:
+    description: Kit that provides the host Qt (Android kits only).
+    required: false
+    default: ""
+  host-run-id:
+    description: Workflow run that has the host Qt artifact. Empty means this run.
+    required: false
+    default: ""
+  pool:
+    description: >-
+      Items to build: main (the stage jobs) or webengine (QtWebEngine and the
+      modules that use it, when they run on a separate runner).
+    required: false
+    default: main
+  state-from:
+    description: Artifact with the state that the previous job left.
+    required: true
+  state-name:
+    description: >-
+      Base artifact name for the state that this job saves. Each job and each
+      attempt has its own name (<state-name>-r<attempt>), so a failed upload
+      cannot destroy the state of an earlier job or attempt.
+    required: true
+  fail-if-remaining:
+    description: "true for the last job of a pool: fail if items are left."
+    required: false
+    default: "false"
+  job-minutes:
+    description: The timeout-minutes value of the calling job.
+    required: true
+  reserve-minutes:
+    description: Minutes kept free at the end of the job to save the prefix.
+    required: false
+    default: "30"
+
+outputs:
+  remaining:
+    description: Number of items of the pool that are not built yet.
+    value: ${{ steps.run.outputs.remaining }}
+  state-name:
+    description: Artifact that has the newest state after this job.
+    value: ${{ steps.result.outputs.state_name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Record the start time
+      shell: bash
+      run: echo "QTCI_STAGE_START=$(date +%s)" >> "$GITHUB_ENV"
+
+    - uses: actions/setup-python@v7
+      with:
+        python-version: "3.12"
+
+    # Each attempt of a job saves its state as <state-name>-r<attempt>, so a
+    # failed upload never deletes the state of an earlier attempt. Use the
+    # newest one if an earlier attempt saved one. The lookup fails the job on
+    # an API error, so that a transient error does not make the job continue
+    # from the older state of the previous job.
+    - name: Look for the state of an earlier attempt
+      id: find
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        STATE_NAME: ${{ inputs.state-name }}
+        STATE_FROM: ${{ inputs.state-from }}
+      run: |
+        name=$(python - <<'EOF'
+        import json, os, re, urllib.request
+        base = (f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}"
+                f"/actions/runs/{os.environ['GITHUB_RUN_ID']}/artifacts?per_page=100")
+        pattern = re.compile(re.escape(os.environ["STATE_NAME"]) + r"-r([0-9]+)")
+        best, page = None, 1
+        while True:
+            req = urllib.request.Request(f"{base}&page={page}", headers={
+                "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                "Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                artifacts = json.load(resp)["artifacts"]
+            for a in artifacts:
+                m = pattern.fullmatch(a["name"])
+                if m and not a["expired"] and (best is None or int(m[1]) > best[0]):
+                    best = (int(m[1]), a["name"])
+            if len(artifacts) < 100:
+                break
+            page += 1
+        print(best[1] if best else "")
+        EOF
+        )
+        echo "name=$name" >> "$GITHUB_OUTPUT"
+        if [ -z "$name" ]; then
+          echo "::notice::No state from an earlier attempt of this job ($STATE_NAME); using $STATE_FROM."
+        else
+          echo "::notice::Using the state of an earlier attempt: $name."
+        fi
+
+    - name: Download the state of an earlier attempt
+      id: own
+      if: steps.find.outputs.name != ''
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ steps.find.outputs.name }}
+        path: ${{ runner.temp }}/state
+
+    - name: Download the state of the previous job
+      if: steps.find.outputs.name == ''
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ inputs.state-from }}
+        path: ${{ runner.temp }}/state
+
+    - uses: ./.github/actions/setup-kit
+      with:
+        kit: ${{ inputs.kit }}
+        host: ${{ inputs.host }}
+        toolchain: ${{ inputs.toolchain }}
+        state-dir: ${{ runner.temp }}/state
+        webengine: ${{ inputs.webengine }}
+        host-kit: ${{ inputs.host-kit }}
+        host-run-id: ${{ inputs.host-run-id }}
+
+    - name: Build
+      id: run
+      shell: bash
+      env:
+        JOB_MINUTES: ${{ inputs.job-minutes }}
+        RESERVE_MINUTES: ${{ inputs.reserve-minutes }}
+        POOL: ${{ inputs.pool }}
+        FAIL_IF_REMAINING: ${{ inputs.fail-if-remaining }}
+        RUNNER_KIND: ${{ runner.environment }}
+      run: |
+        # A GitHub-hosted job stops after 360 minutes, whatever its timeout
+        # is. The deadline must come before that stop, or nothing is saved.
+        if [ "$RUNNER_KIND" = github-hosted ]; then
+          export QTCI_GITHUB_HOSTED=1
+          if [ "$JOB_MINUTES" -gt 360 ]; then
+            echo "::warning::A GitHub-hosted job stops after 360 minutes; the job uses 360, not $JOB_MINUTES."
+            JOB_MINUTES=360
+          fi
+        fi
+        deadline=$(( QTCI_STAGE_START + (JOB_MINUTES - RESERVE_MINUTES) * 60 ))
+        if [ "${{ inputs.host }}" = "macos" ]; then ulimit -n 10240; fi
+        args=(--state "$RUNNER_TEMP/state" --deadline "$deadline" --pool "$POOL")
+        if [ "$FAIL_IF_REMAINING" = "true" ]; then args+=(--fail-if-remaining); fi
+        # exec: on a cancel, the runner signals the shell of the step;
+        # Python must get the signal to stop the build processes.
+        exec python tools/qtci.py stage "${args[@]}"
+
+    # A new name for each attempt: the upload cannot delete an older state.
+    - name: Save the build state
+      id: save
+      if: always() && steps.run.outputs.saved == 'true'
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.state-name }}-r${{ github.run_attempt }}
+        path: ${{ runner.temp }}/state
+        compression-level: 0
+        retention-days: 7
+
+    - name: Report the newest state
+      id: result
+      if: always()
+      shell: bash
+      env:
+        SAVED: ${{ steps.save.outcome }}
+        OWN: ${{ steps.own.outcome }}
+        OWN_NAME: ${{ steps.find.outputs.name }}
+        SAVED_NAME: ${{ inputs.state-name }}-r${{ github.run_attempt }}
+        STATE_FROM: ${{ inputs.state-from }}
+      run: |
+        if [ "$SAVED" = "success" ]; then
+          echo "state_name=$SAVED_NAME" >> "$GITHUB_OUTPUT"
+        elif [ "$OWN" = "success" ]; then
+          echo "state_name=$OWN_NAME" >> "$GITHUB_OUTPUT"
+        else
+          echo "state_name=$STATE_FROM" >> "$GITHUB_OUTPUT"
+        fi

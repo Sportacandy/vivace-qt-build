@@ -1,0 +1,158 @@
+name: Build the FFmpeg of a kit
+description: >
+  Builds the LGPL FFmpeg of one kit with tools/build-ffmpeg.sh, or restores it
+  from the cache, and runs its license gate and checks. kit.yml and ffmpeg.yml
+  use this action.
+
+inputs:
+  state-dir:
+    description: Directory with state.json and deps.json of qtci.py plan.
+    required: true
+  toolchain:
+    description: msvc, mingw, android, gcc, or clang.
+    required: true
+  cache-key:
+    description: The ffmpeg_key output of qtci.py plan.
+    required: true
+  out:
+    description: Install directory of FFmpeg.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the cached FFmpeg
+      id: cache
+      uses: actions/cache@v6
+      with:
+        path: ${{ inputs.out }}
+        key: ${{ inputs.cache-key }}
+
+    # A cache hit can restore an incomplete tree (a restore that stopped
+    # part-way). Then build-ffmpeg builds again and needs the build tools,
+    # so the next steps ask for a complete FFmpeg, not for a cache hit.
+    - name: Check the cached FFmpeg
+      id: status
+      shell: bash
+      env:
+        STATE_DIR: ${{ inputs.state-dir }}
+        OUT: ${{ inputs.out }}
+      run: python tools/qtci.py ffmpeg-status --state "$STATE_DIR" --out "$OUT"
+
+    # The FFmpeg configure script needs a POSIX shell. Qt uses MSYS2 for its
+    # Windows FFmpeg too. Only on a GitHub-hosted runner: a self-hosted
+    # machine keeps its own MSYS2 (QTCI_MSYS2_ROOT).
+    - name: Set up MSYS2
+      id: msys2
+      if: steps.status.outputs.complete != 'true' && runner.os == 'Windows' && runner.environment == 'github-hosted'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MSYS
+        update: false
+        install: make diffutils pkgconf
+
+    - name: Install build tools
+      if: steps.status.outputs.complete != 'true'
+      shell: bash
+      env:
+        TOOLCHAIN: ${{ inputs.toolchain }}
+        RUNNER_KIND: ${{ runner.environment }}
+        MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+      run: |
+        # A self-hosted runner keeps its own software: the step only checks
+        # that the tools are there. meson, ninja, and CMake come from pip.
+        hosted=false
+        if [ "$RUNNER_KIND" = github-hosted ]; then hosted=true; fi
+        missing=()
+        case "$RUNNER_OS" in
+          Linux)
+            packages=(make pkg-config nasm)
+            if [ "$TOOLCHAIN" != android ]; then
+              # VAAPI and OpenSSL, as in the Linux FFmpeg of Qt; FreeType and
+              # Fontconfig for libaribcaption; zlib (PNG, Matroska); a C++
+              # compiler for libvpl and libaribcaption. patchelf sets the
+              # RUNPATH of the libraries.
+              packages+=(g++ patchelf libva-dev libssl-dev libfreetype-dev libfontconfig-dev zlib1g-dev)
+            fi
+            if [ "$hosted" = true ]; then
+              sudo apt-get update -q
+              sudo apt-get install -y -q --no-install-recommends --no-upgrade "${packages[@]}"
+            fi
+            for p in "${packages[@]}"; do
+              dpkg -s "$p" > /dev/null 2>&1 || missing+=("$p")
+            done ;;
+          macOS)
+            if [ "$hosted" = true ] && ! command -v pkg-config > /dev/null; then
+              HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 brew install pkgconf
+            fi
+            for tool in make pkg-config; do
+              command -v "$tool" > /dev/null || missing+=("$tool")
+            done ;;
+          Windows)
+            msys="${QTCI_MSYS2_ROOT:-C:/msys64}"
+            if [ "$hosted" = true ]; then
+              msys="$MSYS2_LOCATION"
+              echo "QTCI_MSYS2_ROOT=$msys" >> "$GITHUB_ENV"
+              if ! command -v nasm > /dev/null; then
+                # choco exit codes 3010 and 1641 only ask for a reboot.
+                rc=0
+                choco install -y --no-progress nasm || rc=$?
+                [ "$rc" -eq 0 ] || [ "$rc" -eq 3010 ] || [ "$rc" -eq 1641 ] || exit "$rc"
+                printf '%s\n' 'C:\Program Files\NASM' >> "$GITHUB_PATH"
+                PATH="/c/Program Files/NASM:$PATH"
+              fi
+            fi
+            command -v nasm > /dev/null || missing+=(nasm)
+            for tool in make cmp pkg-config; do
+              [ -f "$(cygpath -u "$msys")/usr/bin/$tool.exe" ] || missing+=("$tool (MSYS2 in $msys)")
+            done ;;
+        esac
+        if [ ${#missing[@]} -gt 0 ]; then
+          echo "::error::The FFmpeg build needs these tools on this runner: ${missing[*]}. Install them, then re-run the job."
+          exit 1
+        fi
+
+    # For a complete FFmpeg from the cache, build-ffmpeg only runs the license
+    # gate and the checks. The checks need the runtime libraries that the
+    # step above installs, so a cache hit on Linux also needs them.
+    - name: Install runtime libraries
+      if: steps.status.outputs.complete == 'true' && runner.os == 'Linux' && inputs.toolchain != 'android'
+      shell: bash
+      env:
+        RUNNER_KIND: ${{ runner.environment }}
+      run: |
+        packages=(libva2 libva-drm2 libva-x11-2 libssl3t64 libfreetype6 libfontconfig1)
+        if [ "$RUNNER_KIND" = github-hosted ]; then
+          sudo apt-get update -q
+          install=("${packages[@]}")
+          # Ubuntu 24.04 names the OpenSSL package libssl3t64; 22.04 libssl3.
+          if ! apt-cache show libssl3t64 > /dev/null 2>&1; then
+            install=("${install[@]/libssl3t64/libssl3}")
+          fi
+          sudo apt-get install -y -q --no-install-recommends --no-upgrade "${install[@]}"
+        fi
+        # A self-hosted runner keeps its own software: only check. Ubuntu
+        # 24.04 names the OpenSSL package libssl3t64; older systems libssl3.
+        missing=()
+        for p in "${packages[@]}"; do
+          if [ "$p" = libssl3t64 ]; then
+            dpkg -s libssl3t64 > /dev/null 2>&1 || dpkg -s libssl3 > /dev/null 2>&1 || missing+=("libssl3t64 or libssl3")
+          else
+            dpkg -s "$p" > /dev/null 2>&1 || missing+=("$p")
+          fi
+        done
+        if [ ${#missing[@]} -gt 0 ]; then
+          echo "::error::The checks of the cached FFmpeg need these packages on this runner: ${missing[*]}. Install them, then re-run the job."
+          exit 1
+        fi
+
+    - name: Build FFmpeg
+      shell: bash
+      env:
+        STATE_DIR: ${{ inputs.state-dir }}
+        OUT: ${{ inputs.out }}
+      run: |
+        # exec: on a cancel, the runner signals the shell of the step;
+        # Python must get the signal to stop the build processes.
+        exec python tools/qtci.py build-ffmpeg --state "$STATE_DIR" \
+          --work "$RUNNER_TEMP/ffmpeg-work" --out "$OUT"

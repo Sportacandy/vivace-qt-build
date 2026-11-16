@@ -1,0 +1,300 @@
+# Builds OSS Qt with the patches in patches/<qt_version>/ for the selected kits.
+#
+# Runner labels and the stage length come from repository variables, so the
+# same workflow runs on GitHub-hosted, larger, or self-hosted runners:
+#   QTCI_RUNNER_<KIT>      runner for one kit, for example QTCI_RUNNER_MSVC2022_64
+#   QTCI_RUNNER_WINDOWS    runner for all Windows-hosted kits (MSVC, MinGW, Android)
+#   QTCI_RUNNER_LINUX      runner for gcc_64
+#   QTCI_RUNNER_MACOS      runner for macos
+#   QTCI_STAGE_MINUTES     timeout of each stage job (default 350; at most 360 on
+#                          GitHub-hosted runners, up to 7200 on self-hosted runners)
+#   QTCI_RUNNER_WEBENGINE_<KIT>
+#                          runner for QtWebEngine and Qt WebView only, for
+#                          MSVC2022_64, GCC_64 or MACOS. If set, the other
+#                          modules stay on the kit runner, and QtWebEngine is
+#                          built after them on this runner.
+#   QTCI_WEBENGINE_MINUTES timeout of the QtWebEngine job (default 1380)
+# A runner value can be a label ("windows-2022") or a JSON array of labels
+# ('["self-hosted", "windows", "x64"]').
+
+name: Build Qt
+
+on:
+  workflow_dispatch:
+    inputs:
+      qt_version:
+        description: Qt version (a file in versions/ must exist)
+        default: "6.12.0"
+        required: true
+      kits:
+        description: 'Comma-separated kits without spaces, or "all": msvc2022_64,mingw1310_64,android_arm64_v8a,android_x86_64,gcc_64,macos'
+        default: all
+        required: true
+      docs:
+        description: Build and install the documentation
+        type: choice
+        options: [kit-default, "on", "off"]
+        default: kit-default
+      webengine:
+        description: Build QtWebEngine (desktop kits; needs a QTCI_RUNNER_WEBENGINE_<KIT> runner with no 6-hour limit)
+        type: boolean
+        default: false
+      skip_modules:
+        description: Comma-separated Qt modules to leave out (for example qtopenapi,qtgrpc)
+        default: ""
+      release_tag:
+        description: Upload the archives to this GitHub release (created if missing). Empty means artifacts only.
+        default: ""
+      host_run_id:
+        description: For Android kits, the run that built mingw1310_64. Empty means this run.
+        default: ""
+
+permissions:
+  contents: write
+  # The publish job of kit.yml deletes the per-job state artifacts of its run.
+  actions: write
+
+jobs:
+  # Stops the run before any build starts when the kit selection is wrong,
+  # for example an unknown kit or Android kits without a host Qt. Every kit
+  # job needs this job.
+  check-inputs:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read  # the artifacts of the host_run_id run
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check the inputs
+        env:
+          KITS: ${{ inputs.kits }}
+          HOST_RUN_ID: ${{ inputs.host_run_id }}
+          QT_VERSION: ${{ inputs.qt_version }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          GH_TOKEN: ${{ github.token }}
+          DOCS: ${{ inputs.docs }}
+          SKIP: ${{ inputs.skip_modules }}
+          WEBENGINE: ${{ inputs.webengine }}
+          STAGE_MINUTES: ${{ vars.QTCI_STAGE_MINUTES || '350' }}
+          WEBENGINE_RUNNER_MSVC2022_64: ${{ vars.QTCI_RUNNER_WEBENGINE_MSVC2022_64 || '' }}
+          WEBENGINE_RUNNER_GCC_64: ${{ vars.QTCI_RUNNER_WEBENGINE_GCC_64 || '' }}
+          WEBENGINE_RUNNER_MACOS: ${{ vars.QTCI_RUNNER_WEBENGINE_MACOS || '' }}
+        run: |
+          # Only kit names and commas: a newline would hide a kit from the
+          # checks below and from the kit jobs.
+          if ! [[ "$KITS" =~ ^[A-Za-z0-9_,]+$ ]]; then
+            echo "::error::kits must be all, or kit names separated by commas, without spaces."
+            exit 1
+          fi
+          known=" msvc2022_64 mingw1310_64 android_arm64_v8a android_x86_64 gcc_64 macos "
+          if [ "$KITS" != all ]; then
+            IFS=, read -ra selected <<< "$KITS"
+            for kit in "${selected[@]}"; do
+              if [[ "$known" != *" $kit "* ]]; then
+                echo "::error::Unknown kit '$kit'. Use all, or a comma-separated list without spaces of:$known"
+                exit 1
+              fi
+            done
+          fi
+          if ! [[ "$QT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::qt_version must be a version such as 6.12.0."
+            exit 1
+          fi
+          # The same rule as the release step of kit.yml. A tag that starts
+          # with "-" would be read as a gh option.
+          if [ -n "$RELEASE_TAG" ]; then
+            if ! [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] \
+               || ! git check-ref-format "refs/tags/$RELEASE_TAG"; then
+              echo "::error::release_tag must be a valid tag name that starts with a letter or digit and contains only letters, digits, '.', '_', '+', and '-'."
+              exit 1
+            fi
+          fi
+          if [ -n "$HOST_RUN_ID" ] && ! [[ "$HOST_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::host_run_id must be the numeric ID of a workflow run, for example 12345678901."
+            exit 1
+          fi
+          kits=",$KITS,"
+          android=false
+          if [ "$KITS" = all ] || [[ "$kits" == *,android_* ]]; then android=true; fi
+          mingw=false
+          if [ "$KITS" = all ] || [[ "$kits" == *,mingw1310_64,* ]]; then mingw=true; fi
+          if [ "$android" = true ] && [ "$mingw" = false ] && [ -z "$HOST_RUN_ID" ]; then
+            echo "::error::Android kits need the mingw1310_64 host Qt. Add mingw1310_64 to kits, or set host_run_id to a run that built it."
+            exit 1
+          fi
+          if [ "$android" = true ] && [ "$mingw" = true ] && [ -n "$HOST_RUN_ID" ]; then
+            echo "::error::Set host_run_id only when kits does not contain mingw1310_64. Otherwise the Android kits would use the host Qt of the other run."
+            exit 1
+          fi
+          # The Android kits run the host tools (moc, rcc) of that run and
+          # publish the result. Accept only a run of this workflow that a
+          # maintainer started in this repository: a pull request run can
+          # upload an artifact with any name. Check now that the host Qt of
+          # this Qt version is there, before prepare builds FFmpeg for Android.
+          if [ "$android" = true ] && [ -n "$HOST_RUN_ID" ]; then
+            if ! run_info=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$HOST_RUN_ID" \
+                              --jq '[.path, .event, .head_repository.full_name] | @tsv'); then
+              echo "::error::Cannot read run $HOST_RUN_ID of this repository."
+              exit 1
+            fi
+            IFS=$'\t' read -r run_path run_event run_repo <<< "$run_info"
+            if [ "$run_path" != .github/workflows/build.yml ] || [ "$run_event" != workflow_dispatch ] \
+               || [ "$run_repo" != "$GITHUB_REPOSITORY" ]; then
+              echo "::error::Run $HOST_RUN_ID is not a build.yml run started from the Actions tab of this repository (it is a $run_event run of $run_path in $run_repo)."
+              exit 1
+            fi
+            host_artifact="host-qt-$QT_VERSION-mingw1310_64"
+            if ! count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$HOST_RUN_ID/artifacts?name=$host_artifact" \
+                           --jq '[.artifacts[] | select(.expired | not)] | length'); then
+              echo "::error::Cannot read the artifacts of run $HOST_RUN_ID of this repository."
+              exit 1
+            fi
+            if [ "$count" -lt 1 ]; then
+              echo "::error::Run $HOST_RUN_ID has no $host_artifact artifact. It expires after 7 days, and the run must have built mingw1310_64 of Qt $QT_VERSION. Build mingw1310_64 again."
+              exit 1
+            fi
+          fi
+          # The plan of each kit, with the runner variables of this run: an
+          # item that cannot fit in a stage job stops the run here, before
+          # any kit starts to build. No network access.
+          if [ "$KITS" = all ]; then
+            selected=(msvc2022_64 mingw1310_64 android_arm64_v8a android_x86_64 gcc_64 macos)
+          fi
+          for kit in "${selected[@]}"; do
+            args=(--qt-version "$QT_VERSION" --kit "$kit" --docs "$DOCS" --skip "$SKIP"
+                  --stage-minutes "$STAGE_MINUTES" --check-only)
+            # The same arguments as prepare of kit.yml. Only these kits get
+            # the webengine input and a QtWebEngine runner variable.
+            case "$kit" in
+              msvc2022_64|gcc_64|macos)
+                if [ "$WEBENGINE" = true ]; then args+=(--webengine); fi
+                var="WEBENGINE_RUNNER_${kit^^}"
+                runner="${!var:-}"
+                if [ -n "${runner//[[:space:]]/}" ]; then args+=(--offload-webengine); fi ;;
+            esac
+            if ! python3 tools/qtci.py plan "${args[@]}"; then
+              echo "::error::The plan of $kit is not valid. Read the message above."
+              exit 1
+            fi
+          done
+
+  msvc2022_64:
+    needs: check-inputs
+    if: inputs.kits == 'all' || contains(format(',{0},', inputs.kits), ',msvc2022_64,')
+    uses: ./.github/workflows/kit.yml
+    concurrency:
+      group: qtci-msvc2022_64
+      cancel-in-progress: false
+    with:
+      kit: msvc2022_64
+      qt_version: ${{ inputs.qt_version }}
+      runner: ${{ vars.QTCI_RUNNER_MSVC2022_64 || vars.QTCI_RUNNER_WINDOWS || 'windows-2022' }}
+      stage_minutes: ${{ fromJSON(vars.QTCI_STAGE_MINUTES || '350') }}
+      docs: ${{ inputs.docs }}
+      webengine: ${{ inputs.webengine }}
+      webengine_runner: ${{ vars.QTCI_RUNNER_WEBENGINE_MSVC2022_64 || '' }}
+      webengine_minutes: ${{ fromJSON(vars.QTCI_WEBENGINE_MINUTES || '1380') }}
+      skip_modules: ${{ inputs.skip_modules }}
+      release_tag: ${{ inputs.release_tag }}
+
+  mingw1310_64:
+    needs: check-inputs
+    if: inputs.kits == 'all' || contains(format(',{0},', inputs.kits), ',mingw1310_64,')
+    uses: ./.github/workflows/kit.yml
+    concurrency:
+      group: qtci-mingw1310_64
+      cancel-in-progress: false
+    with:
+      kit: mingw1310_64
+      qt_version: ${{ inputs.qt_version }}
+      runner: ${{ vars.QTCI_RUNNER_MINGW1310_64 || vars.QTCI_RUNNER_WINDOWS || 'windows-2022' }}
+      stage_minutes: ${{ fromJSON(vars.QTCI_STAGE_MINUTES || '350') }}
+      docs: ${{ inputs.docs }}
+      skip_modules: ${{ inputs.skip_modules }}
+      release_tag: ${{ inputs.release_tag }}
+
+  # The Android kits use the MinGW kit as the host Qt, like the
+  # *-on-mingw-1310.bat scripts. They wait for mingw1310_64 in this run,
+  # or use the one from host_run_id.
+  android_arm64_v8a:
+    needs: [check-inputs, mingw1310_64]
+    if: >-
+      !cancelled()
+      && needs.check-inputs.result == 'success'
+      && (needs.mingw1310_64.result == 'success' || inputs.host_run_id != '')
+      && (inputs.kits == 'all' || contains(format(',{0},', inputs.kits), ',android_arm64_v8a,'))
+    uses: ./.github/workflows/kit.yml
+    concurrency:
+      group: qtci-android_arm64_v8a
+      cancel-in-progress: false
+    with:
+      kit: android_arm64_v8a
+      qt_version: ${{ inputs.qt_version }}
+      runner: ${{ vars.QTCI_RUNNER_ANDROID_ARM64_V8A || vars.QTCI_RUNNER_WINDOWS || 'windows-2022' }}
+      stage_minutes: ${{ fromJSON(vars.QTCI_STAGE_MINUTES || '350') }}
+      docs: ${{ inputs.docs }}
+      skip_modules: ${{ inputs.skip_modules }}
+      release_tag: ${{ inputs.release_tag }}
+      host_run_id: ${{ inputs.host_run_id }}
+
+  android_x86_64:
+    needs: [check-inputs, mingw1310_64]
+    if: >-
+      !cancelled()
+      && needs.check-inputs.result == 'success'
+      && (needs.mingw1310_64.result == 'success' || inputs.host_run_id != '')
+      && (inputs.kits == 'all' || contains(format(',{0},', inputs.kits), ',android_x86_64,'))
+    uses: ./.github/workflows/kit.yml
+    concurrency:
+      group: qtci-android_x86_64
+      cancel-in-progress: false
+    with:
+      kit: android_x86_64
+      qt_version: ${{ inputs.qt_version }}
+      runner: ${{ vars.QTCI_RUNNER_ANDROID_X86_64 || vars.QTCI_RUNNER_WINDOWS || 'windows-2022' }}
+      stage_minutes: ${{ fromJSON(vars.QTCI_STAGE_MINUTES || '350') }}
+      docs: ${{ inputs.docs }}
+      skip_modules: ${{ inputs.skip_modules }}
+      release_tag: ${{ inputs.release_tag }}
+      host_run_id: ${{ inputs.host_run_id }}
+
+  gcc_64:
+    needs: check-inputs
+    if: inputs.kits == 'all' || contains(format(',{0},', inputs.kits), ',gcc_64,')
+    uses: ./.github/workflows/kit.yml
+    concurrency:
+      group: qtci-gcc_64
+      cancel-in-progress: false
+    with:
+      kit: gcc_64
+      qt_version: ${{ inputs.qt_version }}
+      runner: ${{ vars.QTCI_RUNNER_GCC_64 || vars.QTCI_RUNNER_LINUX || 'ubuntu-24.04' }}
+      stage_minutes: ${{ fromJSON(vars.QTCI_STAGE_MINUTES || '350') }}
+      docs: ${{ inputs.docs }}
+      webengine: ${{ inputs.webengine }}
+      webengine_runner: ${{ vars.QTCI_RUNNER_WEBENGINE_GCC_64 || '' }}
+      webengine_minutes: ${{ fromJSON(vars.QTCI_WEBENGINE_MINUTES || '1380') }}
+      skip_modules: ${{ inputs.skip_modules }}
+      release_tag: ${{ inputs.release_tag }}
+
+  macos:
+    needs: check-inputs
+    if: inputs.kits == 'all' || contains(format(',{0},', inputs.kits), ',macos,')
+    uses: ./.github/workflows/kit.yml
+    concurrency:
+      group: qtci-macos
+      cancel-in-progress: false
+    with:
+      kit: macos
+      qt_version: ${{ inputs.qt_version }}
+      runner: ${{ vars.QTCI_RUNNER_MACOS || 'macos-15' }}
+      stage_minutes: ${{ fromJSON(vars.QTCI_STAGE_MINUTES || '350') }}
+      docs: ${{ inputs.docs }}
+      webengine: ${{ inputs.webengine }}
+      webengine_runner: ${{ vars.QTCI_RUNNER_WEBENGINE_MACOS || '' }}
+      webengine_minutes: ${{ fromJSON(vars.QTCI_WEBENGINE_MINUTES || '1380') }}
+      skip_modules: ${{ inputs.skip_modules }}
+      release_tag: ${{ inputs.release_tag }}

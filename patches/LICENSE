@@ -1,0 +1,28 @@
+License of the patches in this directory
+
+The patches in this directory change Qt source code. They are licensed
+under the same open-source terms as the Qt modules that they change:
+
+    SPDX-License-Identifier: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+
+You can use the patches under any one of these three licenses. The full
+license texts are in the LICENSES directory:
+
+- LICENSES/LGPL-3.0-only.txt
+- LICENSES/GPL-2.0-only.txt
+- LICENSES/GPL-3.0-only.txt
+
+The LGPL v3 adds permissions to the GPL v3, so LGPL-3.0-only.txt must be
+read together with GPL-3.0-only.txt.
+
+These terms cover the changes made by the patches. The Qt code around the
+changes keeps the license stated in each Qt source file.
+
+Exception: qtmultimedia-wsola-pitch-compensation.patch adds a copy of the
+SoundTouch library (src/3rdparty/soundtouch/). SoundTouch is by Olli
+Parviainen and is licensed under the LGPL v2.1 or later, as stated in its
+own files. That license is compatible with the LGPL v3.
+
+The rest of this repository (tools/, versions/ and .github/) is licensed
+under the GPL v3 or later. See ../LICENSE. The GPL of these scripts does
+not apply to the Qt kits that they build.
