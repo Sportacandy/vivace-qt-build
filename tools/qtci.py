@@ -2035,7 +2035,9 @@ def copy_qt_attributions(module: str, src: Path, prefix: Path) -> int:
         if "/tests/" in f"/{rel}":
             continue
         try:
-            data = json.loads(attribution.read_text(encoding="utf-8"))
+            # strict=False: some Qt files have a raw line break inside a
+            # string (qtbase src/3rdparty/forkfd).
+            data = json.loads(attribution.read_text(encoding="utf-8"), strict=False)
         except (OSError, ValueError) as exc:
             raise RuntimeError(f"{module}: cannot read {rel}: {exc}") from exc
         for entry in data if isinstance(data, list) else [data]:
