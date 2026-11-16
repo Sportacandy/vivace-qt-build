@@ -1290,7 +1290,8 @@
       ],
       "module_configure_args": [],
       "skip": [
-        "qtactiveqt"
+        "qtactiveqt",
+        "qtwayland"
       ],
       "env": {
         "LANG": "C.UTF-8",
