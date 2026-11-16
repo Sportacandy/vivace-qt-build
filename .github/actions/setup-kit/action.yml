@@ -307,7 +307,7 @@ runs:
         if [ "$DOWNLOADED" = success ]; then
           mv -f "$RUNNER_TEMP"/ffmpeg-source-download/ffmpeg-*-source.tar "$STATE_DIR/"
         fi
-        if ! compgen -G "$STATE_DIR/ffmpeg-*-source.tar" > /dev/null; then
+        if ! ls "$STATE_DIR"/ffmpeg-*-source.tar > /dev/null 2>&1; then
           echo "::error::The FFmpeg source archive is in neither the state nor the ffmpeg-source artifact. Select Re-run all jobs."
           exit 1
         fi
