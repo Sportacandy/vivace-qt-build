@@ -869,7 +869,6 @@
         "-DVulkan_INCLUDE_DIR={vulkan_include}"
       ],
       "module_configure_args": [
-        "-debug-and-release",
         "-cmake-generator",
         "Ninja Multi-Config"
       ],

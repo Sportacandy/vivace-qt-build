@@ -1144,6 +1144,25 @@ def setup_windows_openssl() -> None:
     die("OpenSSL 3 headers not found; install OpenSSL 3 (choco install openssl)")
 
 
+def space_free_dir(path: str, link: Path) -> str:
+    """Return path, or a directory junction at link to it if path has a space.
+
+    MinGW's windres splits include paths at spaces, so a resource file of a
+    target that includes C:/Program Files/... does not compile.
+    """
+    if " " not in path:
+        return path
+    if " " in str(link):
+        die(f"{link} contains a space; the MinGW build needs a deps directory without spaces")
+    if os.path.isjunction(link) or os.path.islink(link):
+        os.rmdir(link)  # a junction of an earlier job; the target stays
+    elif os.path.lexists(link):
+        die(f"{link} exists and is not a junction; delete it, then re-run the job")
+    link.parent.mkdir(parents=True, exist_ok=True)
+    run(["cmd", "/c", "mklink", "/J", str(link), str(Path(path))])
+    return str(link)
+
+
 def android_sdk() -> str:
     sdk = os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME")
     if not sdk:
@@ -1224,6 +1243,13 @@ def cmd_setup_deps(args) -> None:
         pg = os.environ.get("PGROOT")
         if pg and (Path(pg) / "include" / "libpq-fe.h").is_file():
             set_env("QTCI_PG_ROOT", pg)
+        if kit["toolchain"] == "mingw":
+            # Next to the deps directory, not in it: the dependency cache
+            # saves that directory, and a restore turns a junction into a copy.
+            links = root.resolve().parent / "qtci-links"
+            for var, name in (("QTCI_OPENSSL_DIR", "openssl"), ("QTCI_PG_ROOT", "pg")):
+                if os.environ.get(var):
+                    set_env(var, space_free_dir(os.environ[var], links / name))
         if state["webengine"]:
             choco = Path(os.environ.get("ChocolateyInstall", r"C:\ProgramData\chocolatey"))
             tools = choco / "lib" / "winflexbison3" / "tools"
