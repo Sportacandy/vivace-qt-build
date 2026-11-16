@@ -496,10 +496,12 @@ flowchart LR
   `mkspecs`, metatypes, SBOM files) and copied examples do not count.
 - A docs item fails if the module has `.qdocconf` files but no docs target.
 - Exception for both: Qt does not build some modules on some platforms, for
-  example qtactiveqt outside Windows. Its configure step then says "Skipping
-  the build as the condition ... is not met", and its install adds no file of
-  the module. Such a module passes with a warning, and its examples are not
-  copied. `qtdoc` installs nothing by design (`installs_nothing: true` of the
+  example qtwayland on Windows and Android. Its configure step then says
+  "Skipping the build as the condition ... is not met", and its install adds
+  no file of the module. Such a module passes with a warning, and its examples
+  are not copied. qtactiveqt is different: outside Windows, it builds only its
+  documentation and does not print this message. So the `skip` lists of the
+  Linux, macOS, and Android kits contain qtactiveqt. `qtdoc` installs nothing by design (`installs_nothing: true` of the
   module). To let a module install nothing on one kit only, add it to the
   `installs_nothing` list of that kit.
 - `package` runs when no earlier job failed. It fails if items are left. It

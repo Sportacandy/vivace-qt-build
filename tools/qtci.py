@@ -1830,8 +1830,8 @@ CONFIGURE_LOG = ".qtci-configure.log"
 def qt_skipped_build(build: Path) -> bool:
     """Return True if the configure step said that Qt skips this module here.
 
-    Qt modules that a platform does not support (for example qtactiveqt
-    outside Windows) end their configure step with this standard message,
+    Qt modules that a platform does not support (for example qtwayland on
+    Windows and Android) end their configure step with this standard message,
     and then build and install nothing.
     """
     try:

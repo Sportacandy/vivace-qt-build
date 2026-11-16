@@ -1074,7 +1074,8 @@
       ],
       "module_configure_args": [],
       "skip": [
-        "qtwebengine"
+        "qtwebengine",
+        "qtactiveqt"
       ],
       "env": {
         "LANG": "C.UTF-8"
@@ -1156,7 +1157,8 @@
       ],
       "module_configure_args": [],
       "skip": [
-        "qtwebengine"
+        "qtwebengine",
+        "qtactiveqt"
       ],
       "env": {
         "LANG": "C.UTF-8"
@@ -1229,6 +1231,9 @@
         "-DQT_BUILD_EXAMPLES=OFF"
       ],
       "module_configure_args": [],
+      "skip": [
+        "qtactiveqt"
+      ],
       "post_install": {
         "qtmultimedia": [
           [
@@ -1285,6 +1290,9 @@
         "-DQT_BUILD_EXAMPLES=OFF"
       ],
       "module_configure_args": [],
+      "skip": [
+        "qtactiveqt"
+      ],
       "env": {
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8"
