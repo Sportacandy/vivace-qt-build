@@ -1735,7 +1735,9 @@ def cmd_package_ffmpeg(args) -> None:
             for p in entries:
                 tar.add(p, f"{name}/{p.relative_to(src).as_posix()}", recursive=False)
     digest = file_digest(archive, "sha256")
-    (out_dir / f"{archive.name}.sha256").write_text(f"{digest}  {archive.name}\n")
+    # LF on every host: "sha256sum -c" reads a CR as part of the file name.
+    (out_dir / f"{archive.name}.sha256").write_text(f"{digest}  {archive.name}\n",
+                                                    newline="\n")
     shutil.copy2(src / FFMPEG_CHECKS, out_dir / f"{name}-checks.txt")
     write_ffmpeg_source_bundle(recipe, out_dir / f"{name}-source.tar")
     log(f"{archive.name}: SHA-256 {digest}")
@@ -2695,7 +2697,8 @@ def cmd_package(args) -> None:
     else:
         die(f"unsupported archive type: {name}")
     digest = file_digest(archive, "sha256")
-    (out_dir / f"{name}.sha256").write_text(f"{digest}  {name}\n")
+    # LF on every host: "sha256sum -c" reads a CR as part of the file name.
+    (out_dir / f"{name}.sha256").write_text(f"{digest}  {name}\n", newline="\n")
     size = archive.stat().st_size
     log(f"{name}: {size / 2**30:.2f} GiB, SHA-256 {digest}")
 
