@@ -89,6 +89,7 @@ jobs:
       webengine_runs_on: ${{ steps.runner.outputs.webengine_runs_on }}
       host: ${{ steps.plan.outputs.host }}
       toolchain: ${{ steps.plan.outputs.toolchain }}
+      container: ${{ steps.plan.outputs.container }}
       host_kit: ${{ steps.plan.outputs.host_kit }}
       webengine: ${{ steps.plan.outputs.webengine }}
       offload: ${{ steps.plan.outputs.offload }}
@@ -178,8 +179,56 @@ jobs:
   ffmpeg:
     needs: [prepare]
     runs-on: ${{ fromJSON(needs.prepare.outputs.ffmpeg_runs_on) }}
+    # The Android kits have no container: their FFmpeg is cross-compiled.
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: 120
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (FFmpeg, dav1d, pip packages).
@@ -187,6 +236,7 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-python@v7
+        if: needs.prepare.outputs.container == ''
         with:
           python-version: "3.12"
 
@@ -235,11 +285,58 @@ jobs:
   s1:
     needs: [prepare, ffmpeg]
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: ${{ inputs.stage_minutes }}
     outputs:
       remaining: ${{ steps.stage.outputs.remaining }}
       state_name: ${{ steps.stage.outputs.state-name }}
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -263,11 +360,58 @@ jobs:
     needs: [prepare, s1]
     if: needs.s1.outputs.remaining != '0'
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: ${{ inputs.stage_minutes }}
     outputs:
       remaining: ${{ steps.stage.outputs.remaining }}
       state_name: ${{ steps.stage.outputs.state-name }}
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -291,11 +435,58 @@ jobs:
     needs: [prepare, s2]
     if: needs.s2.outputs.remaining != '0'
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: ${{ inputs.stage_minutes }}
     outputs:
       remaining: ${{ steps.stage.outputs.remaining }}
       state_name: ${{ steps.stage.outputs.state-name }}
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -319,11 +510,58 @@ jobs:
     needs: [prepare, s3]
     if: needs.s3.outputs.remaining != '0'
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: ${{ inputs.stage_minutes }}
     outputs:
       remaining: ${{ steps.stage.outputs.remaining }}
       state_name: ${{ steps.stage.outputs.state-name }}
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -347,11 +585,58 @@ jobs:
     needs: [prepare, s4]
     if: needs.s4.outputs.remaining != '0'
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: ${{ inputs.stage_minutes }}
     outputs:
       remaining: ${{ steps.stage.outputs.remaining }}
       state_name: ${{ steps.stage.outputs.state-name }}
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -375,11 +660,58 @@ jobs:
     needs: [prepare, s5]
     if: needs.s5.outputs.remaining != '0'
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: ${{ inputs.stage_minutes }}
     outputs:
       remaining: ${{ steps.stage.outputs.remaining }}
       state_name: ${{ steps.stage.outputs.state-name }}
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -403,11 +735,58 @@ jobs:
     needs: [prepare, s6]
     if: needs.s6.outputs.remaining != '0'
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: ${{ inputs.stage_minutes }}
     outputs:
       remaining: ${{ steps.stage.outputs.remaining }}
       state_name: ${{ steps.stage.outputs.state-name }}
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -431,11 +810,58 @@ jobs:
     needs: [prepare, s7]
     if: needs.s7.outputs.remaining != '0'
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: ${{ inputs.stage_minutes }}
     outputs:
       remaining: ${{ steps.stage.outputs.remaining }}
       state_name: ${{ steps.stage.outputs.state-name }}
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -459,11 +885,58 @@ jobs:
     needs: [prepare, s8]
     if: needs.s8.outputs.remaining != '0'
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: ${{ inputs.stage_minutes }}
     outputs:
       remaining: ${{ steps.stage.outputs.remaining }}
       state_name: ${{ steps.stage.outputs.state-name }}
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -487,11 +960,58 @@ jobs:
     needs: [prepare, s9]
     if: needs.s9.outputs.remaining != '0'
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: ${{ inputs.stage_minutes }}
     outputs:
       remaining: ${{ steps.stage.outputs.remaining }}
       state_name: ${{ steps.stage.outputs.state-name }}
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -515,11 +1035,58 @@ jobs:
     needs: [prepare, s10]
     if: needs.s10.outputs.remaining != '0'
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: ${{ inputs.stage_minutes }}
     outputs:
       remaining: ${{ steps.stage.outputs.remaining }}
       state_name: ${{ steps.stage.outputs.state-name }}
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -543,11 +1110,58 @@ jobs:
     needs: [prepare, s11]
     if: needs.s11.outputs.remaining != '0'
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: ${{ inputs.stage_minutes }}
     outputs:
       remaining: ${{ steps.stage.outputs.remaining }}
       state_name: ${{ steps.stage.outputs.state-name }}
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -568,6 +1182,8 @@ jobs:
           job-minutes: ${{ inputs.stage_minutes }}
 
   # Builds QtWebEngine and the modules that use it, after all stage jobs.
+  # Never in a container: qtci.py plan stops a container kit that offloads
+  # QtWebEngine.
   webengine:
     needs: [prepare, ffmpeg, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12]
     if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.prepare.outputs.offload == 'true' }}
@@ -598,10 +1214,57 @@ jobs:
     needs: [prepare, ffmpeg, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, webengine]
     if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
+    container: ${{ needs.prepare.outputs.container }}
     timeout-minutes: 180
     # Read-only: this runner can be self-hosted and ran third-party build
     # code. The publish job does the writes on a new GitHub-hosted machine.
     steps:
+      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -609,6 +1272,7 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-python@v7
+        if: needs.prepare.outputs.container == ''
         with:
           python-version: "3.12"
 

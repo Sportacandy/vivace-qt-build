@@ -101,6 +101,7 @@ jobs:
       webengine_runs_on: ${{{{ steps.runner.outputs.webengine_runs_on }}}}
       host: ${{{{ steps.plan.outputs.host }}}}
       toolchain: ${{{{ steps.plan.outputs.toolchain }}}}
+      container: ${{{{ steps.plan.outputs.container }}}}
       host_kit: ${{{{ steps.plan.outputs.host_kit }}}}
       webengine: ${{{{ steps.plan.outputs.webengine }}}}
       offload: ${{{{ steps.plan.outputs.offload }}}}
@@ -190,8 +191,11 @@ jobs:
   ffmpeg:
     needs: [prepare]
     runs-on: ${{{{ fromJSON(needs.prepare.outputs.ffmpeg_runs_on) }}}}
+    # The Android kits have no container: their FFmpeg is cross-compiled.
+    container: ${{{{ needs.prepare.outputs.container }}}}
     timeout-minutes: 120
     steps:
+{prepare}
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (FFmpeg, dav1d, pip packages).
@@ -199,6 +203,7 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-python@v7
+        if: needs.prepare.outputs.container == ''
         with:
           python-version: "3.12"
 
@@ -245,15 +250,77 @@ jobs:
           retention-days: 7
 '''
 
+# The first step of the jobs that can run in the container of a kit
+# (versions/<qt_version>.json, "container"). A container starts from a bare
+# image: this step adds the tools that the later steps expect from a
+# GitHub-hosted runner (sudo, Git for actions/checkout, curl, xz, zstd), and
+# Python 3.12, which actions/setup-python cannot install in a Debian image.
+# Debian 12 has only Python 3.11, so it comes from python-build-standalone,
+# pinned by SHA-256. QTCI_JOB_START lets the stage deadline count from this
+# step; the container start before it is not counted. In a container job,
+# ${{ runner.temp }} can be the host path while $RUNNER_TEMP is the container
+# path. The steps use both forms for the same directories, so a symlink makes
+# the host path point to $RUNNER_TEMP. Only a GitHub-hosted runner works: on a self-hosted runner the
+# Build FFmpeg action only checks for the build packages, and a new container
+# has none.
+PREPARE = r'''      - name: Prepare the container
+        if: needs.prepare.outputs.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          echo "QTCI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+'''
+
 STAGE = r'''
   s{i}:
     needs: [prepare{prev_needs}]
 {cond}    runs-on: ${{{{ fromJSON(needs.prepare.outputs.runs_on) }}}}
+    container: ${{{{ needs.prepare.outputs.container }}}}
     timeout-minutes: ${{{{ inputs.stage_minutes }}}}
     outputs:
       remaining: ${{{{ steps.stage.outputs.remaining }}}}
       state_name: ${{{{ steps.stage.outputs.state-name }}}}
     steps:
+{prepare}
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -276,6 +343,8 @@ STAGE = r'''
 
 TAIL = r'''
   # Builds QtWebEngine and the modules that use it, after all stage jobs.
+  # Never in a container: qtci.py plan stops a container kit that offloads
+  # QtWebEngine.
   webengine:
     needs: [prepare, ffmpeg, {all_stages}]
     if: ${{{{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.prepare.outputs.offload == 'true' }}}}
@@ -306,10 +375,12 @@ TAIL = r'''
     needs: [prepare, ffmpeg, {all_stages}, webengine]
     if: ${{{{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}}}
     runs-on: ${{{{ fromJSON(needs.prepare.outputs.runs_on) }}}}
+    container: ${{{{ needs.prepare.outputs.container }}}}
     timeout-minutes: 180
     # Read-only: this runner can be self-hosted and ran third-party build
     # code. The publish job does the writes on a new GitHub-hosted machine.
     steps:
+{prepare}
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (Qt, Chromium, pip packages).
@@ -317,6 +388,7 @@ TAIL = r'''
           persist-credentials: false
 
       - uses: actions/setup-python@v7
+        if: needs.prepare.outputs.container == ''
         with:
           python-version: "3.12"
 
@@ -494,7 +566,7 @@ TAIL = r'''
 
 
 def main() -> None:
-    out = [HEAD.format(n=STAGES)]
+    out = [HEAD.format(n=STAGES, prepare=PREPARE)]
     for i in range(1, STAGES + 1):
         if i == 1:
             prev_needs, cond = ", ffmpeg", ""
@@ -504,12 +576,13 @@ def main() -> None:
             cond = f"    if: needs.s{i - 1}.outputs.remaining != '0'\n"
             state_from = f"${{{{ needs.s{i - 1}.outputs.state_name }}}}"
         out.append(STAGE.format(i=i, prev_needs=prev_needs, cond=cond,
-                                state_from=state_from, last=str(i == STAGES).lower()))
+                                state_from=state_from, last=str(i == STAGES).lower(),
+                                prepare=PREPARE))
     # The newest state of the stage jobs: the last stage that ran. A skipped
     # stage has an empty output.
     stages_state = " || ".join(f"needs.s{i}.outputs.state_name" for i in range(STAGES, 0, -1))
     out.append(TAIL.format(all_stages=", ".join(f"s{i}" for i in range(1, STAGES + 1)),
-                           stages_state=stages_state))
+                           stages_state=stages_state, prepare=PREPARE))
     sys.stdout.write("".join(out))
 
 

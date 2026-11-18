@@ -815,6 +815,15 @@ def ffmpeg_target(kit: dict) -> str:
     return kit["host"]
 
 
+def ffmpeg_options(kit: dict) -> str:
+    """Return the key of the configure options, parts, and checks of a kit.
+
+    It is the build-ffmpeg.sh target, unless the kit names another option set
+    (ffmpeg_options), for example for a CPU without the x86-only parts.
+    """
+    return kit.get("ffmpeg_options", ffmpeg_target(kit))
+
+
 # The files that control the FFmpeg build. Their SHA-256 values are part of
 # the recipe, and the source archives contain them.
 FFMPEG_SCRIPTS = ("tools/build-ffmpeg.sh", "tools/qtci.py",
@@ -825,6 +834,9 @@ def ffmpeg_recipe(cfg: dict, kit: dict) -> dict:
     """Everything that decides the FFmpeg of a kit. Its hash is the cache key."""
     tools = cfg["toolchains"]["ffmpeg"]
     target = ffmpeg_target(kit)
+    options = ffmpeg_options(kit)
+    if options not in tools["parts"]:
+        die(f"unknown ffmpeg_options {options}")
 
     def source(info: dict) -> dict:
         url = info["url"].format(version=info["version"])
@@ -839,13 +851,17 @@ def ffmpeg_recipe(cfg: dict, kit: dict) -> dict:
         "meson": tools["meson"],
         "ninja": tools["ninja"],
         "cmake": tools["cmake"],
-        "configure": tools["configure"]["common"] + tools["configure"].get(target, []),
-        "checks": tools["checks"].get(target, {}),
+        "configure": tools["configure"]["common"] + tools["configure"].get(options, []),
+        "checks": tools["checks"].get(options, {}),
         # Every script of the FFmpeg build: a change of one must not reuse a
         # cached FFmpeg, and the source archive ships these exact files.
         "scripts": {rel: file_digest(ROOT / rel, "sha256") for rel in FFMPEG_SCRIPTS},
     }
-    for part in tools["parts"][target]:
+    # Only when it differs, so the recipe content of the other kits does not
+    # change. (Their cache keys change with every edit of this file.)
+    if options != target:
+        recipe["options"] = options
+    for part in tools["parts"][options]:
         recipe[part] = source(tools[part])
     if target != "android":
         # kit_environment gives these to the FFmpeg build (CC, CXX, PATH).
@@ -881,6 +897,12 @@ def cmd_plan(args) -> None:
     if args.webengine and not webengine:
         log(f"note: QtWebEngine is not built for {args.kit}")
     docs = {"on": True, "off": False}.get(args.docs, kit.get("docs", False))
+    # docs_unavailable gives the reason why a kit cannot build its docs (no
+    # qdoc). Then docs=on does not apply to it, as webengine for a kit that
+    # skips QtWebEngine.
+    if docs and kit.get("docs_unavailable"):
+        log(f"note: no docs for {args.kit}: {kit['docs_unavailable']}")
+        docs = False
     order = module_order(cfg, kit, webengine, skip)
     # skip_modules can remove qtwebengine; then nothing needs its toolchain.
     webengine = webengine and "qtwebengine" in order
@@ -889,6 +911,12 @@ def cmd_plan(args) -> None:
     # built last, by a separate job on a runner without the 6-hour limit.
     offloaded = (dependents(cfg, {"qtwebengine"}, order)
                  if webengine and args.offload_webengine else set())
+    # The webengine job runs on its own runner, never in the container of
+    # the kit, so it would build with other libraries than the stage jobs.
+    if offloaded and kit.get("container"):
+        die(f"{args.kit} builds in the container {kit['container']}; its QtWebEngine "
+            "cannot be built by the webengine job. Add qtwebengine to the skip list "
+            "of the kit, or plan it without --offload-webengine.")
     items = []
     for pool in (MAIN_POOL, WEBENGINE_POOL):
         modules = [m for m in order if (m in offloaded) == (pool == WEBENGINE_POOL)]
@@ -955,6 +983,9 @@ def cmd_plan(args) -> None:
         log("Built by the webengine job: " + " ".join(m for m in order if m in offloaded))
     set_output("host", kit["host"])
     set_output("toolchain", kit["toolchain"])
+    # The container image of the ffmpeg, stage, and package jobs. Empty: the
+    # jobs run directly on the runner.
+    set_output("container", kit.get("container", ""))
     set_output("host_kit", deps.get("host_kit", ""))
     set_output("android_abi", kit.get("android_abi", ""))
     # "webengine" is true when the stage jobs build QtWebEngine themselves.

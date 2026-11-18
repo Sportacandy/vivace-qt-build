@@ -62,7 +62,7 @@ installed Qt 6.12.0 headers say `LicenseRef-Qt-Commercial OR GPL-3.0-only`:
 | `qtcoap` | Qt CoAP |
 | `qtmqtt` | Qt MQTT |
 | `qtcanvaspainter` | Qt Canvas Painter, Qt Canvas 2D |
-| `qtwayland` (`gcc_64` only) | Qt Wayland Compositor. The Wayland client plugin is LGPL. |
+| `qtwayland` (`gcc_64` and `gcc_arm64` only) | Qt Wayland Compositor. The Wayland client plugin is LGPL. |
 | `qtquickeffectmaker` | Qt Quick Effect Maker (`qqem`), a tool without the Qt GPL exception |
 
 The test libraries Qt Multimedia Test Lib, Qt Quick Test Utils, and Qt Quick
@@ -139,6 +139,7 @@ kit:
 | `msvc2022_64` | MSVC in MSYS2, on the Windows runner of the kit | `ffmpeg-7.1.5-lgpl-win64-msvc.zip` |
 | `mingw1310_64` | MinGW 13.1 in MSYS2, on the Windows runner of the kit | `ffmpeg-7.1.5-lgpl-win64-mingw.zip` |
 | `gcc_64` | GCC, on the Linux runner of the kit | `ffmpeg-7.1.5-lgpl-linux-x64.tar.xz` |
+| `gcc_arm64` | GCC, in the `debian:bookworm` container of the kit | Not released. The kit archive and the release have its source. |
 | `macos` | Clang, on the macOS runner of the kit (arm64 only) | `ffmpeg-7.1.5-lgpl-macos-arm64.tar.xz` |
 | `android_arm64_v8a`, `android_x86_64` | The Android NDK, on `ubuntu-24.04` | Not released |
 
@@ -191,6 +192,7 @@ Hardware and operating system encoders:
 |-----|----------|
 | `msvc2022_64`, `mingw1310_64` | NVIDIA NVENC: `h264_nvenc`, `hevc_nvenc`, `av1_nvenc`. Intel QSV: `h264_qsv`, `hevc_qsv`, `av1_qsv`, `vp9_qsv`, `mpeg2_qsv`, `mjpeg_qsv`. AMD AMF: `h264_amf`, `hevc_amf`, `av1_amf`. Media Foundation: `h264_mf`, `hevc_mf`, `aac_mf`, `ac3_mf`, `mp3_mf`. Direct3D 12, `msvc2022_64` only: `hevc_d3d12va`. |
 | `gcc_64` | NVIDIA NVENC: `h264_nvenc`, `hevc_nvenc`, `av1_nvenc`. Intel QSV: `h264_qsv`, `hevc_qsv`, `av1_qsv`. VA-API: `h264_vaapi`, `hevc_vaapi`, `av1_vaapi`. |
+| `gcc_arm64` | VA-API: `h264_vaapi`, `hevc_vaapi`, `av1_vaapi`. The `linux_arm64` option set (`ffmpeg_options` of the kit) leaves out QSV, which is x86 only, and NVENC, because the target boards have no NVIDIA GPU. Raspberry Pi has no VA-API driver, and the common options turn off V4L2 M2M, so the kit has no hardware encoder on Raspberry Pi. |
 | `macos` | VideoToolbox: `h264_videotoolbox`, `hevc_videotoolbox`. |
 | `android_arm64_v8a`, `android_x86_64` | MediaCodec encoders of FFmpeg. The Android FFmpeg has no programs, so the checks do not list them. |
 
@@ -254,6 +256,7 @@ kits, which have no programs.
    |-----|----------|
    | `msvc2022_64`, `mingw1310_64` | `h264_nvenc`, `hevc_nvenc`, `av1_nvenc`, `h264_qsv`, `hevc_qsv`, `av1_qsv`, `h264_amf`, `hevc_amf`, `av1_amf`, `h264_mf`, `hevc_mf`, `mpeg2video` |
    | `gcc_64` | `h264_nvenc`, `hevc_nvenc`, `av1_nvenc`, `h264_qsv`, `hevc_qsv`, `av1_qsv`, `h264_vaapi`, `hevc_vaapi`, `av1_vaapi`, `mpeg2video` |
+   | `gcc_arm64` | `h264_vaapi`, `hevc_vaapi`, `av1_vaapi`, `mpeg2video` |
    | `macos` | `h264_videotoolbox`, `hevc_videotoolbox`, `mpeg2video` |
 
 3. `ffmpeg -hide_banner -decoders` must list `libaribcaption`, `png`, and the decoders
@@ -364,6 +367,7 @@ kit archive.
 | `android_arm64_v8a` | `windows-2022` | `opensource-qtmake6120-android-arm64-v8a-on-mingw-1310.bat` | `qt-6.12.0-oss-self-built-android_arm64_v8a.zip` |
 | `android_x86_64` | `windows-2022` | `opensource-qtmake6120-android-x86_64-on-mingw-1310.bat` | `qt-6.12.0-oss-self-built-android_x86_64.zip` |
 | `gcc_64` | `ubuntu-24.04` | `6.11.1/qtmake6.sh` | `qt-6.12.0-oss-self-built-linux_x64.tar.xz` |
+| `gcc_arm64` | `ubuntu-24.04-arm`, in a `debian:bookworm` container | None | `qt-6.12.0-oss-self-built-linux_arm64.tar.xz` |
 | `macos` | `macos-15` (arm64) | `6.11.1/qtmake6-macos.sh` | `qt-6.12.0-oss-self-built-macos_arm64.tar.xz` |
 
 Each archive has one top-level directory, `6.12.0/<kit>/`. Extract it into the
@@ -372,6 +376,18 @@ build used.
 
 The Android kits use the `mingw1310_64` kit as the host Qt (`QT_HOST_PATH`),
 the same as the local `*-on-mingw-1310.bat` scripts.
+
+The `gcc_arm64` kit is for Linux on arm64 based on Debian 12, for example
+Raspberry Pi OS (Legacy, 64-bit), the release for Debian 12 "bookworm".
+Its `ffmpeg`, stage, and `package` jobs run in the
+`debian:bookworm` container that the kit names (`container` in
+`versions/<qt_version>.json`). So the kit links the libraries of Debian 12,
+for example glibc 2.36 and ICU 72, and runs on Debian 12 and on Raspberry Pi
+OS based on Debian 12. Other distributions do not have the same library
+versions. Examples are Ubuntu 24.04 and the current Raspberry Pi OS, which is
+based on Debian 13 "trixie" and has ICU 76. The first step of each of these jobs installs
+`sudo`, Git, curl, xz, zstd, and a Python 3.12 into the container.
+The kit has no QtWebEngine and no docs. Read [Known limitations](#known-limitations).
 
 The configure options of each kit are in
 [`versions/6.12.0.json`](versions/6.12.0.json), under `kits`. They follow the
@@ -416,7 +432,7 @@ Compare the result with the `.sha256` file before you use it.
 |-------|---------|-------------|
 | `qt_version` | `6.12.0` | Qt version. The file `versions/<qt_version>.json` must exist. |
 | `kits` | `all` | Kits to build. |
-| `docs` | `kit-default` | `on` or `off` overrides the `docs` value of each kit. All kits default to `on`, like the local scripts. |
+| `docs` | `kit-default` | `on` or `off` overrides the `docs` value of each kit. All kits except `gcc_arm64` default to `on`, like the local scripts. |
 | `webengine` | `false` | Build QtWebEngine for `msvc2022_64`, `gcc_64`, and `macos`. It needs a runner without the 6-hour limit. Read [QtWebEngine](#qtwebengine) first. |
 | `skip_modules` | empty | Comma-separated modules to leave out, for example `qtcoap,qtgrpc`. |
 | `release_tag` | empty | Upload the archives to this release. Empty means artifacts only. It must be a valid tag name that starts with a letter or digit and has only letters, digits, `.`, `_`, `+`, and `-`. |
@@ -582,7 +598,7 @@ them in **Settings** > **Secrets and variables** > **Actions** > **Variables**.
 |----------|---------|---------|
 | `QTCI_RUNNER_<KIT>` | not set | One kit, for example `QTCI_RUNNER_MSVC2022_64`. |
 | `QTCI_RUNNER_WINDOWS` | `windows-2022` | `msvc2022_64`, `mingw1310_64`, both Android kits. |
-| `QTCI_RUNNER_LINUX` | `ubuntu-24.04` | `gcc_64`. |
+| `QTCI_RUNNER_LINUX` | `ubuntu-24.04` | `gcc_64`. Not `gcc_arm64`: only `QTCI_RUNNER_GCC_ARM64` sets its runner, and the default is `ubuntu-24.04-arm`. The runner of `gcc_arm64` must be a GitHub-hosted arm64 runner. |
 | `QTCI_RUNNER_MACOS` | `macos-15` | `macos`. |
 | `QTCI_STAGE_MINUTES` | `350` | The timeout of each stage job. |
 | `QTCI_RUNNER_WEBENGINE_<KIT>` | not set | QtWebEngine and Qt WebView of one kit: `MSVC2022_64`, `GCC_64`, or `MACOS`. Read [QtWebEngine](#qtwebengine). |
@@ -826,6 +842,24 @@ Build results:
   its tag. Android OpenSSL is the newest commit when `prepare` runs. The FFmpeg
   sources have checksums, but MSYS2 and the system packages of the `ffmpeg`
   job have no fixed version.
+- The `gcc_arm64` kit has no QtWebEngine, no docs, and no Clang-based tools
+  (`FEATURE_clang` is off). `qdoc` needs libclang. Qt has a prebuilt
+  libclang for Linux on arm64, but this repository does not set it up for
+  the kit yet. With `docs` set to `on`, the plan leaves out the
+  docs of this kit and prints a note (`docs_unavailable` of the kit). The
+  `webengine` job never runs in a container, so the plan stops if a
+  container kit offloads QtWebEngine.
+- The runner of `gcc_arm64` must be a GitHub-hosted Linux arm64 runner, for
+  example `ubuntu-24.04-arm`. On a self-hosted runner, the Build FFmpeg
+  action only checks for the build packages, and a new container has none
+  of them. So the first
+  step of each container job stops on a self-hosted runner. The pin of the
+  Python 3.12 in the container is for aarch64 only. In a container, a cancel
+  or a job timeout does not send a signal to `qtci.py`. The runner stops the
+  processes when it removes the container, and the stage saves nothing, the
+  same as on the host. The Build FFmpeg workflow
+  does not release the FFmpeg of `gcc_arm64`; the kit archive contains it,
+  and the release has its source.
 - The FFmpeg of the Windows kits needs no runtime DLL that the kit does not
   have. MSVC uses the static C runtime (`/MT`), like the FFmpeg of Qt. MinGW
   links `libgcc`, `libstdc++`, and `libwinpthread` statically, and FFmpeg
@@ -1063,7 +1097,8 @@ The workflows follow the local scripts, with these changes:
 | Notifications | `mailx` mail | Workflow status | Not needed on GitHub. |
 
 The scripts for Linux and macOS are for Qt 6.11.1. Nobody has built Qt 6.12.0
-with them yet, so the `gcc_64` and `macos` kits are the least tested.
+with them yet, so the `gcc_64` and `macos` kits are less tested. The
+`gcc_arm64` kit has no local script, and nobody has built it yet.
 
 ## Add a Qt version
 

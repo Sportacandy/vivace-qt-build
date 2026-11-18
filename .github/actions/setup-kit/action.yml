@@ -149,7 +149,8 @@ runs:
     # Removes preinstalled tools that the build does not use. Only on a
     # GitHub-hosted runner: a self-hosted machine keeps its own software.
     - name: Free disk space
-      if: inputs.host == 'linux' && runner.environment == 'github-hosted'
+      # In a container, these paths are not on the host disk.
+      if: inputs.host == 'linux' && runner.environment == 'github-hosted' && env.QTCI_CONTAINER != 'true'
       shell: bash
       run: |
         df -h /
@@ -268,8 +269,10 @@ runs:
     - name: Compute the dependency cache key
       id: deps-key
       shell: bash
+      env:
+        STATE_DIR: ${{ inputs.state-dir }}
       run: |
-        hash=$(python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest()[:16])" "${{ inputs.state-dir }}/deps.json")
+        hash=$(python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest()[:16])" "$STATE_DIR/deps.json")
         echo "key=qtci-deps-${{ inputs.kit }}-${{ runner.os }}-$hash" >> "$GITHUB_OUTPUT"
 
     - name: Restore cached dependencies
@@ -347,8 +350,10 @@ runs:
       shell: bash
       # No token: setup-deps runs third-party code (pip, aqt, sdkmanager) and
       # calls no GitHub API.
+      env:
+        STATE_DIR: ${{ inputs.state-dir }}
       run: |
-        args=(--state "${{ inputs.state-dir }}" --deps-dir "$RUNNER_TEMP/qtci-deps"
+        args=(--state "$STATE_DIR" --deps-dir "$RUNNER_TEMP/qtci-deps"
               --ffmpeg-dir "$RUNNER_TEMP/ffmpeg")
         # exec: on a cancel, the runner signals the shell of the step;
         # Python must get the signal to stop its child processes.

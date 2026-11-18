@@ -77,11 +77,15 @@ runs:
           done
         fi
 
+    # In a container, the job started before "Prepare the container" (kit.yml),
+    # which recorded QTCI_JOB_START.
     - name: Record the start time
       shell: bash
-      run: echo "QTCI_STAGE_START=$(date +%s)" >> "$GITHUB_ENV"
+      run: echo "QTCI_STAGE_START=${QTCI_JOB_START:-$(date +%s)}" >> "$GITHUB_ENV"
 
+    # A container has the Python 3.12 of "Prepare the container" (kit.yml).
     - uses: actions/setup-python@v7
+      if: env.QTCI_CONTAINER != 'true'
       with:
         python-version: "3.12"
 

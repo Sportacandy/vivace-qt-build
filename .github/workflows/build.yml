@@ -4,7 +4,8 @@
 # same workflow runs on GitHub-hosted, larger, or self-hosted runners:
 #   QTCI_RUNNER_<KIT>      runner for one kit, for example QTCI_RUNNER_MSVC2022_64
 #   QTCI_RUNNER_WINDOWS    runner for all Windows-hosted kits (MSVC, MinGW, Android)
-#   QTCI_RUNNER_LINUX      runner for gcc_64
+#   QTCI_RUNNER_LINUX      runner for gcc_64 (x64; gcc_arm64 has only
+#                          QTCI_RUNNER_GCC_ARM64, default ubuntu-24.04-arm)
 #   QTCI_RUNNER_MACOS      runner for macos
 #   QTCI_STAGE_MINUTES     timeout of each stage job (default 350; at most 360 on
 #                          GitHub-hosted runners, up to 7200 on self-hosted runners)
@@ -27,7 +28,7 @@ on:
         default: "6.12.0"
         required: true
       kits:
-        description: 'Comma-separated kits without spaces, or "all": msvc2022_64,mingw1310_64,android_arm64_v8a,android_x86_64,gcc_64,macos'
+        description: 'Comma-separated kits without spaces, or "all": msvc2022_64,mingw1310_64,android_arm64_v8a,android_x86_64,gcc_64,gcc_arm64,macos'
         default: all
         required: true
       docs:
@@ -89,7 +90,7 @@ jobs:
             echo "::error::kits must be all, or kit names separated by commas, without spaces."
             exit 1
           fi
-          known=" msvc2022_64 mingw1310_64 android_arm64_v8a android_x86_64 gcc_64 macos "
+          known=" msvc2022_64 mingw1310_64 android_arm64_v8a android_x86_64 gcc_64 gcc_arm64 macos "
           if [ "$KITS" != all ]; then
             IFS=, read -ra selected <<< "$KITS"
             for kit in "${selected[@]}"; do
@@ -161,7 +162,7 @@ jobs:
           # item that cannot fit in a stage job stops the run here, before
           # any kit starts to build. No network access.
           if [ "$KITS" = all ]; then
-            selected=(msvc2022_64 mingw1310_64 android_arm64_v8a android_x86_64 gcc_64 macos)
+            selected=(msvc2022_64 mingw1310_64 android_arm64_v8a android_x86_64 gcc_64 gcc_arm64 macos)
           fi
           for kit in "${selected[@]}"; do
             args=(--qt-version "$QT_VERSION" --kit "$kit" --docs "$DOCS" --skip "$SKIP"
@@ -277,6 +278,25 @@ jobs:
       webengine: ${{ inputs.webengine }}
       webengine_runner: ${{ vars.QTCI_RUNNER_WEBENGINE_GCC_64 || '' }}
       webengine_minutes: ${{ fromJSON(vars.QTCI_WEBENGINE_MINUTES || '1380') }}
+      skip_modules: ${{ inputs.skip_modules }}
+      release_tag: ${{ inputs.release_tag }}
+
+  # Linux arm64. The jobs of kit.yml run in the debian:bookworm container of
+  # the kit (versions/<qt_version>.json), so that the kit needs only the
+  # glibc of Debian 12. The kit skips QtWebEngine and has no webengine job.
+  gcc_arm64:
+    needs: check-inputs
+    if: inputs.kits == 'all' || contains(format(',{0},', inputs.kits), ',gcc_arm64,')
+    uses: ./.github/workflows/kit.yml
+    concurrency:
+      group: qtci-gcc_arm64
+      cancel-in-progress: false
+    with:
+      kit: gcc_arm64
+      qt_version: ${{ inputs.qt_version }}
+      runner: ${{ vars.QTCI_RUNNER_GCC_ARM64 || 'ubuntu-24.04-arm' }}
+      stage_minutes: ${{ fromJSON(vars.QTCI_STAGE_MINUTES || '350') }}
+      docs: ${{ inputs.docs }}
       skip_modules: ${{ inputs.skip_modules }}
       release_tag: ${{ inputs.release_tag }}
 
