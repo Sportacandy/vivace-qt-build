@@ -418,7 +418,7 @@ Compare the result with the `.sha256` file before you use it.
 | `kits` | `all` | Kits to build. |
 | `docs` | `kit-default` | `on` or `off` overrides the `docs` value of each kit. All kits default to `on`, like the local scripts. |
 | `webengine` | `false` | Build QtWebEngine for `msvc2022_64`, `gcc_64`, and `macos`. It needs a runner without the 6-hour limit. Read [QtWebEngine](#qtwebengine) first. |
-| `skip_modules` | empty | Comma-separated modules to leave out, for example `qtopenapi,qtgrpc`. |
+| `skip_modules` | empty | Comma-separated modules to leave out, for example `qtcoap,qtgrpc`. |
 | `release_tag` | empty | Upload the archives to this release. Empty means artifacts only. It must be a valid tag name that starts with a letter or digit and has only letters, digits, `.`, `_`, `+`, and `-`. |
 | `host_run_id` | empty | For Android kits only: the ID of an earlier run that built `mingw1310_64`. Empty means this run. |
 
@@ -501,7 +501,13 @@ flowchart LR
   no file of the module. Such a module passes with a warning, and its examples
   are not copied. qtactiveqt is different: outside Windows, it builds only its
   documentation and does not print this message. So the `skip` lists of the
-  Linux, macOS, and Android kits contain qtactiveqt. `qtdoc` installs nothing by design (`installs_nothing: true` of the
+  Linux, macOS, and Android kits contain qtactiveqt. On macOS, the configure
+  step of qtwayland says "QtWayland is missing required dependencies" and
+  also does not print this message, so the `skip` list of `macos` contains
+  qtwayland. qtopenapi needs the OpenAPI Generator (a Java `.jar` file) to
+  build. The runners do not have it, so its configure step says "Not all
+  build dependencies were found", and the `skip` list of every kit contains
+  qtopenapi. `qtdoc` installs nothing by design (`installs_nothing: true` of the
   module). To let a module install nothing on one kit only, add it to the
   `installs_nothing` list of that kit.
 - `package` runs when no earlier job failed. It fails if items are left. It
@@ -547,7 +553,8 @@ first item. The `webengine` job does this check only on a GitHub-hosted
 runner, because the estimates are for a 4-core GitHub-hosted runner.
 
 The job deadline is 30 minutes before the job timeout, counted from the
-start of the stage step (after the runner set-up and the checkout). At the
+start of the stage step (after the runner set-up, the checkout, and the
+check of the self-hosted runner directories). At the
 deadline, the
 job stops the item that is still running and saves the items that finished
 before it. The next job then starts with the stopped item, with the whole
@@ -747,6 +754,59 @@ Qt 6.12.0 has no `v6.12.0` tag for QtWebEngine. The build uses commit
 commit as `opensource-qtmake6120-msvc2022-qtwebengine.bat`. The Android and
 MinGW kits never build QtWebEngine, like the local scripts.
 
+#### Windows runner service without administrator rights
+
+A runner service that does not run as an administrator cannot install
+Python or Chocolatey packages. To prepare such a runner, do these steps once:
+
+1. In an administrator PowerShell, install the tools that the job would
+   install. Leave out the ones that the runner already has:
+
+   ```powershell
+   choco install -y ninja zstandard 7zip
+   ```
+
+   For a `webengine` job, also install `winflexbison3`, `gperf`, and
+   `nodejs-lts`. For the stage jobs of the MinGW and Android kits, also
+   install `cmake`. For `msvc2022_64` and `mingw1310_64`, also install
+   OpenSSL 3 with its headers in `C:\Program Files\OpenSSL-Win64` or
+   `C:\Program Files\OpenSSL`, for example with
+   `choco install -y openssl --version <3.x version>`. An installer without
+   the `include` directory (a "Light" installer) is not enough: the job then
+   stops with the message about an older OpenSSL.
+2. Write the environment of the runner into `.env` in the runner directory,
+   for example `C:\actions-runner\.env`. Use one `NAME=value` line for each
+   variable. The runner does not expand `%NAME%` references, so write the
+   full values:
+
+   ```text
+   PATH=C:\Program Files\Git\bin;C:\Windows\system32;C:\Windows;C:\Windows\System32\WindowsPowerShell\v1.0;C:\ProgramData\chocolatey\bin;C:\Program Files\nodejs;C:\Program Files\CMake\bin
+   QTCI_PREFIX_ROOT=C:/qtci
+   QTCI_WORK=C:/w2
+   ```
+
+   Put the `bin` directory of Git for Windows first. Keep
+   `C:\Windows\System32\WindowsPowerShell\v1.0`, because the runner needs
+   PowerShell. Keep the directories of Chocolatey, Node.js, and CMake, because
+   the job looks for the tools on the `PATH` and installs the missing ones.
+   If the `ffmpeg` job also runs on this runner, install NASM and MSYS2 as
+   the [list of the `ffmpeg` job tools](#self-hosted-qtwebengine-runner)
+   tells, and add the directory of NASM.
+3. Give `actions/setup-python` a Python 3.12. It looks only in the tool cache
+   of the runner, and its installer fails without administrator rights. To
+   use an installed 64-bit Python 3.12, for example 3.12.10 in
+   `C:\Python312`, run in PowerShell:
+
+   ```powershell
+   $d = "C:\actions-runner\_work\_tool\Python\3.12.10"
+   New-Item -ItemType Directory -Force $d | Out-Null
+   New-Item -ItemType Junction -Path "$d\x64" -Target "C:\Python312"
+   New-Item -ItemType File -Force "$d\x64.complete" | Out-Null
+   ```
+
+   Use the version that `python --version` shows.
+4. Restart the runner service, so that it reads `.env` again.
+
 ## Known limitations
 
 This section lists the limitations that the project accepts.
@@ -915,7 +975,10 @@ Self-hosted runners:
 - The tool does not check that `QTCI_WORK` and `QTCI_PREFIX_ROOT` do not
   overlap. Use two separate directories.
 - On a self-hosted Windows runner, `package` installs its Chocolatey packages
-  before it checks for the `QTCI_PREFIX_ROOT` variable.
+  before it checks for the `QTCI_PREFIX_ROOT` variable. The stage and
+  `webengine` jobs check both variables before they download the state.
+- On Windows, the `.sha256` files are written in the encoding of the system
+  locale. The content is ASCII as long as the archive names are ASCII.
 - If the tool cannot delete one file of a failed partial install, it also
   leaves the files after it in the prefix. The saved state leaves them out.
 - When the tool deletes a prefix, it changes the mode of the top-level
