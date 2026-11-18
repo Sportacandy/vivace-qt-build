@@ -63,6 +63,20 @@ outputs:
 runs:
   using: composite
   steps:
+    # The same check as in setup-kit, but before the state download, which
+    # can take more than 20 minutes on a self-hosted runner.
+    - name: Check the directories of a self-hosted runner
+      shell: bash
+      run: |
+        if [ "${RUNNER_ENVIRONMENT:-}" = self-hosted ]; then
+          for var in QTCI_PREFIX_ROOT QTCI_WORK; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::Set $var on this self-hosted runner to a directory that only this build uses. The build deletes files in it."
+              exit 1
+            fi
+          done
+        fi
+
     - name: Record the start time
       shell: bash
       run: echo "QTCI_STAGE_START=$(date +%s)" >> "$GITHUB_ENV"
