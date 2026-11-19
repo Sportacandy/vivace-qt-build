@@ -1012,7 +1012,40 @@ def cmd_plan(args) -> None:
 # setup-deps
 # --------------------------------------------------------------------------
 
-def extract_archive(archive: Path, dest: Path, strip_top: bool) -> None:
+def seven_zip_link_switches(seven: str) -> list[str]:
+    """Return the switches that let 7-Zip extract chained symbolic links.
+
+    7-Zip 25.01 and later refuse a symbolic link that points to another link
+    ("Dangerous link via another link"), for example bin/clang++ -> clang in
+    the macOS libclang archive. -snld20 turns off all the safety checks of
+    7-Zip for symbolic links, also the check for links that point out of the
+    output directory. So use it only for trusted archives that are pinned by
+    a checksum. Older versions do not know the switch and stop on it, so it
+    is added only for 25.01 and later. p7zip (16.02, 17.05) has no such check
+    and gets no switch.
+    """
+    try:
+        banner = subprocess.run([seven], capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL, errors="replace",
+                                timeout=60).stdout
+    except (OSError, subprocess.SubprocessError) as e:
+        log(f"Cannot read the version of {seven} ({e}); extracting without -snld20")
+        return []
+    m = re.search(r"^7-Zip(?: \([a-z]\))? (\d+)\.(\d+)", banner, re.MULTILINE)
+    if m and (int(m.group(1)), int(m.group(2))) >= (25, 1):
+        return ["-snld20"]
+    found = f"version {m.group(1)}.{m.group(2)}" if m else "no 7-Zip version in its output"
+    log(f"{seven}: {found}; extracting without -snld20")
+    return []
+
+
+def extract_archive(archive: Path, dest: Path, strip_top: bool,
+                    link_chains: bool = False) -> None:
+    """Extract archive to dest.
+
+    link_chains=True lets 7-Zip extract symbolic links that point to other
+    links (see seven_zip_link_switches). Set it only for trusted archives.
+    """
     tmp = dest.with_name(dest.name + ".tmp")
     rmtree(tmp)
     tmp.mkdir(parents=True)
@@ -1021,7 +1054,8 @@ def extract_archive(archive: Path, dest: Path, strip_top: bool) -> None:
         seven = shutil.which("7z") or shutil.which("7zz") or shutil.which("7za")
         if not seven:
             die("7-Zip (7z, 7zz or 7za) is required")
-        run([seven, "x", "-y", "-bd", f"-o{tmp}", archive])
+        switches = seven_zip_link_switches(seven) if link_chains else []
+        run([seven, "x", "-y", "-bd", *switches, f"-o{tmp}", archive])
     else:
         run(["tar", "-xf", archive, "-C", tmp])
     src = tmp
@@ -1123,7 +1157,8 @@ def setup_libclang(deps: dict, root: Path) -> None:
         if digest != info["sha1"]:
             archive.unlink()
             die(f"SHA-1 mismatch for {name}: got {digest}, expected {info['sha1']}")
-        extract_archive(archive, dest, strip_top=True)
+        # The archive is pinned by its checksum in the deps file.
+        extract_archive(archive, dest, strip_top=True, link_chains=True)
         archive.unlink()
         stamp.write_text(name + "\n")
     set_env("LLVM_INSTALL_DIR", str(dest))
