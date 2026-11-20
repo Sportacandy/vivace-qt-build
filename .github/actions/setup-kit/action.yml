@@ -189,7 +189,10 @@ runs:
           libprotobuf-dev protobuf-compiler libgrpc++-dev protobuf-compiler-grpc
         )
         if [ "$WEBENGINE" = true ]; then
+          # Without libxcb-dri3-dev, QtWebEngine turns off its X11 support,
+          # and the link of QtWebEngineCore 6.12 fails (GLXHelper::instance).
           packages+=(
+            libxcb-dri3-dev
             gperf bison flex nodejs libnss3-dev libxshmfence-dev libxcomposite-dev
             libxdamage-dev libxrandr-dev libxtst-dev libxkbfile-dev libxss-dev libsnappy-dev
             libopus-dev libvpx-dev libwebp-dev liblcms2-dev libevent-dev libre2-dev libkrb5-dev
