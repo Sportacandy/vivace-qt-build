@@ -717,9 +717,9 @@ built. Give the runner the same toolchain as that GitHub-hosted runner:
 
 | Kit | Runner requirements |
 |-----|---------------------|
-| `msvc2022_64` | Windows x64, Visual Studio 2022 with the x64 C++ tools and the C++ CMake tools, the Windows SDK with the Debugging Tools for Windows, Git for Windows (the job uses its bash), and Chocolatey. The job installs Ninja, zstd, 7-Zip, OpenSSL, WinFlexBison, gperf, and Node.js (if it is missing) with Chocolatey. |
-| `gcc_64` | Ubuntu 24.04 x64 and `sudo` without a password. The job installs the build packages with `apt-get`, and also CMake, the GCC toolchain, and Git if they are missing. |
-| `macos` | macOS arm64 with Xcode and Homebrew. The job installs the build packages with Homebrew, and also CMake if it is missing. |
+| `msvc2022_64` | Windows x64, Visual Studio 2022 with the x64 C++ tools and the C++ CMake tools, the Windows SDK with the Debugging Tools for Windows, Git for Windows (the job uses its bash), and Chocolatey. The job installs Ninja, zstd, 7-Zip, OpenSSL, WinFlexBison, gperf, and Node.js (if it is missing) with Chocolatey. An installed Node.js must be version 20 or later. |
+| `gcc_64` | Ubuntu 24.04 x64, `sudo` without a password, and Node.js 20 or later as `node` in `PATH`. The `nodejs` package of Ubuntu 24.04 is version 18, so install a newer one, for example from NodeSource. The job installs the build packages with `apt-get`, and also CMake, the GCC toolchain, and Git if they are missing. |
+| `macos` | macOS arm64 with Xcode and Homebrew. The job installs the build packages with Homebrew, and also CMake and Node.js if they are missing. An installed Node.js must be version 20 or later. |
 
 On Windows, put the `bin` directory of Git for Windows before
 `C:\Windows\System32` in the `PATH` of the runner. Otherwise the job can use
@@ -975,6 +975,9 @@ Time and re-runs:
 
 Self-hosted runners:
 
+- With QtWebEngine on, the setup step stops if `node` is older than
+  version 20. The job does not install a newer Node.js over an installed
+  one.
 - A finished QtWebEngine build directory (about 100 GB) stays on the runner
   until the next stage or `webengine` job on that runner starts.
 - The job installs only missing tools, and it removes no installed package.

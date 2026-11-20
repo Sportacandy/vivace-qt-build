@@ -246,6 +246,28 @@ runs:
             python3 -m pip install --quiet --break-system-packages html5lib
         fi
 
+    # The configure step of QtWebEngine 6.12 needs Node.js 20 or later
+    # (cmake/FindNodejs.cmake of qtwebengine). The apt package of Ubuntu 24.04
+    # is Node.js 18, and a self-hosted machine can keep its own older Node.js.
+    # GitHub-hosted images have a newer one first in PATH. Stop here, not
+    # after the checkout of Chromium.
+    - name: Check the Node.js version
+      if: inputs.webengine == 'true'
+      shell: bash
+      run: |
+        min=20
+        if ! version=$(node --version 2> /dev/null); then
+          echo "::error::QtWebEngine needs Node.js $min or later, and there is no node in PATH. Install Node.js on this runner, then re-run the job."
+          exit 1
+        fi
+        major=${version#v}
+        major=${major%%.*}
+        if ! [ "$major" -ge "$min" ] 2> /dev/null; then
+          echo "::error::QtWebEngine needs Node.js $min or later, and $(command -v node) is $version. Install a newer Node.js on this runner (on Ubuntu, for example from NodeSource), then re-run the job."
+          exit 1
+        fi
+        echo "Node.js $version ($(command -v node))"
+
     - name: Create the prefix root
       if: inputs.host != 'windows'
       shell: bash
