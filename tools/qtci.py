@@ -912,11 +912,11 @@ def cmd_plan(args) -> None:
     offloaded = (dependents(cfg, {"qtwebengine"}, order)
                  if webengine and args.offload_webengine else set())
     # The webengine job runs on its own runner, never in the container of
-    # the kit, so it would build with other libraries than the stage jobs.
+    # the kit. The stage command checks that this runner runs the system of
+    # the container image, so that it builds with the same libraries.
     if offloaded and kit.get("container"):
-        die(f"{args.kit} builds in the container {kit['container']}; its QtWebEngine "
-            "cannot be built by the webengine job. Add qtwebengine to the skip list "
-            "of the kit, or plan it without --offload-webengine.")
+        log(f"note: the webengine job of {args.kit} builds outside the container "
+            f"{kit['container']}; its runner must run that system itself")
     items = []
     for pool in (MAIN_POOL, WEBENGINE_POOL):
         modules = [m for m in order if (m in offloaded) == (pool == WEBENGINE_POOL)]
@@ -2342,6 +2342,50 @@ def raise_system_exit(signum, _frame) -> None:
     raise SystemExit(128 + signum)
 
 
+def check_runner_system(kit_name: str, kit: dict) -> None:
+    """Stop a job that runs on another system or machine type than the kit needs.
+
+    A kit can name its system: "container" (the image of the container jobs)
+    or, for a kit without a container, "system" (for example ubuntu:24.04).
+    A job outside a container must run that system itself, so that it builds
+    with the same libraries as the other jobs of the kit. This matters for the
+    webengine job, which runs on its own runner and never in the container.
+    The check compares the name and the tag with ID, and with VERSION_CODENAME
+    or VERSION_ID, of /etc/os-release (debian:bookworm: ID=debian,
+    VERSION_CODENAME=bookworm). "arch" of the kit (for example aarch64) is
+    compared with the machine type, also in a container.
+    """
+    arch = kit.get("arch")
+    uname = getattr(os, "uname", None)  # no os.uname on Windows
+    machine = uname().machine if uname else ""
+    if arch and machine != arch:
+        die(f"{kit_name} is for {arch}, but this runner is {machine or 'unknown'}.")
+    image = kit.get("container")
+    if image and os.environ.get("QTCI_CONTAINER") == "true":
+        return
+    system = image or kit.get("system")
+    if not system:
+        return
+    name, _, tag = system.rpartition("/")[2].partition(":")
+    release: dict[str, str] = {}
+    try:
+        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+            key, sep, value = line.partition("=")
+            if sep:
+                release[key.strip()] = value.strip().strip('"')
+    except OSError:
+        pass
+    found = " ".join(filter(None, (release.get("ID"), release.get("VERSION_CODENAME"),
+                                   release.get("VERSION_ID")))) or "no /etc/os-release"
+    if release.get("ID") != name or (tag and tag not in (release.get("VERSION_CODENAME"),
+                                                         release.get("VERSION_ID"))):
+        where = (f"builds in the container {image}. A job outside the container"
+                 if image else f"needs the system {system}. Each job")
+        die(f"{kit_name} {where} must run on that system, so that it uses the same "
+            f"libraries, but this runner has {found}.")
+    log(f"This runner has {found} on {machine}, the system that {kit_name} needs ({system})")
+
+
 def cmd_stage(args) -> None:
     global COMMAND_DEADLINE, RESUME_CONTEXT
     # Check the directory settings before any work (a self-hosted runner
@@ -2352,6 +2396,7 @@ def cmd_stage(args) -> None:
     state = load_state(state_dir)
     cfg = load_version(state["qt_version"])
     kit = cfg["kits"][state["kit"]]
+    check_runner_system(state["kit"], kit)
     prefix = kit_prefix(cfg, kit)
     deadline = float(args.deadline)
     pool = args.pool

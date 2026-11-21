@@ -4,16 +4,20 @@
 # same workflow runs on GitHub-hosted, larger, or self-hosted runners:
 #   QTCI_RUNNER_<KIT>      runner for one kit, for example QTCI_RUNNER_MSVC2022_64
 #   QTCI_RUNNER_WINDOWS    runner for all Windows-hosted kits (MSVC, MinGW, Android)
-#   QTCI_RUNNER_LINUX      runner for gcc_64 (x64; gcc_arm64 has only
-#                          QTCI_RUNNER_GCC_ARM64, default ubuntu-24.04-arm)
+#   QTCI_RUNNER_LINUX      runner for gcc_64 (x64; gcc_arm64 and
+#                          gcc_arm64_ubuntu have only QTCI_RUNNER_GCC_ARM64 and
+#                          QTCI_RUNNER_GCC_ARM64_UBUNTU, default ubuntu-24.04-arm)
 #   QTCI_RUNNER_MACOS      runner for macos
 #   QTCI_STAGE_MINUTES     timeout of each stage job (default 350; at most 360 on
 #                          GitHub-hosted runners, up to 7200 on self-hosted runners)
 #   QTCI_RUNNER_WEBENGINE_<KIT>
 #                          runner for QtWebEngine and Qt WebView only, for
-#                          MSVC2022_64, GCC_64 or MACOS. If set, the other
-#                          modules stay on the kit runner, and QtWebEngine is
-#                          built after them on this runner.
+#                          MSVC2022_64, GCC_64, MACOS, GCC_ARM64 or
+#                          GCC_ARM64_UBUNTU. If set, the other modules stay on
+#                          the kit runner, and QtWebEngine is built after them
+#                          on this runner. The two arm64 kits build QtWebEngine
+#                          only if their variable is set; without it, they
+#                          ignore the webengine input.
 #   QTCI_WEBENGINE_MINUTES timeout of the QtWebEngine job (default 1380)
 # A runner value can be a label ("windows-2022") or a JSON array of labels
 # ('["self-hosted", "windows", "x64"]').
@@ -28,7 +32,7 @@ on:
         default: "6.12.0"
         required: true
       kits:
-        description: 'Comma-separated kits without spaces, or "all": msvc2022_64,mingw1310_64,android_arm64_v8a,android_x86_64,gcc_64,gcc_arm64,macos'
+        description: 'Comma-separated kits without spaces, or "all": msvc2022_64,mingw1310_64,android_arm64_v8a,android_x86_64,gcc_64,gcc_arm64,gcc_arm64_ubuntu,macos'
         default: all
         required: true
       docs:
@@ -83,6 +87,8 @@ jobs:
           WEBENGINE_RUNNER_MSVC2022_64: ${{ vars.QTCI_RUNNER_WEBENGINE_MSVC2022_64 || '' }}
           WEBENGINE_RUNNER_GCC_64: ${{ vars.QTCI_RUNNER_WEBENGINE_GCC_64 || '' }}
           WEBENGINE_RUNNER_MACOS: ${{ vars.QTCI_RUNNER_WEBENGINE_MACOS || '' }}
+          WEBENGINE_RUNNER_GCC_ARM64: ${{ vars.QTCI_RUNNER_WEBENGINE_GCC_ARM64 || '' }}
+          WEBENGINE_RUNNER_GCC_ARM64_UBUNTU: ${{ vars.QTCI_RUNNER_WEBENGINE_GCC_ARM64_UBUNTU || '' }}
         run: |
           # Only kit names and commas: a newline would hide a kit from the
           # checks below and from the kit jobs.
@@ -90,7 +96,7 @@ jobs:
             echo "::error::kits must be all, or kit names separated by commas, without spaces."
             exit 1
           fi
-          known=" msvc2022_64 mingw1310_64 android_arm64_v8a android_x86_64 gcc_64 gcc_arm64 macos "
+          known=" msvc2022_64 mingw1310_64 android_arm64_v8a android_x86_64 gcc_64 gcc_arm64 gcc_arm64_ubuntu macos "
           if [ "$KITS" != all ]; then
             IFS=, read -ra selected <<< "$KITS"
             for kit in "${selected[@]}"; do
@@ -162,19 +168,25 @@ jobs:
           # item that cannot fit in a stage job stops the run here, before
           # any kit starts to build. No network access.
           if [ "$KITS" = all ]; then
-            selected=(msvc2022_64 mingw1310_64 android_arm64_v8a android_x86_64 gcc_64 gcc_arm64 macos)
+            selected=(msvc2022_64 mingw1310_64 android_arm64_v8a android_x86_64 gcc_64 gcc_arm64 gcc_arm64_ubuntu macos)
           fi
           for kit in "${selected[@]}"; do
             args=(--qt-version "$QT_VERSION" --kit "$kit" --docs "$DOCS" --skip "$SKIP"
                   --stage-minutes "$STAGE_MINUTES" --check-only)
             # The same arguments as prepare of kit.yml. Only these kits get
-            # the webengine input and a QtWebEngine runner variable.
+            # the webengine input and a QtWebEngine runner variable. The
+            # arm64 kits get the webengine input only with their runner.
+            var="WEBENGINE_RUNNER_${kit^^}"
+            runner="${!var:-}"
+            runner="${runner//[[:space:]]/}"
             case "$kit" in
               msvc2022_64|gcc_64|macos)
                 if [ "$WEBENGINE" = true ]; then args+=(--webengine); fi
-                var="WEBENGINE_RUNNER_${kit^^}"
-                runner="${!var:-}"
-                if [ -n "${runner//[[:space:]]/}" ]; then args+=(--offload-webengine); fi ;;
+                if [ -n "$runner" ]; then args+=(--offload-webengine); fi ;;
+              gcc_arm64|gcc_arm64_ubuntu)
+                if [ "$WEBENGINE" = true ] && [ -n "$runner" ]; then
+                  args+=(--webengine --offload-webengine)
+                fi ;;
             esac
             if ! python3 tools/qtci.py plan "${args[@]}"; then
               echo "::error::The plan of $kit is not valid. Read the message above."
@@ -281,9 +293,12 @@ jobs:
       skip_modules: ${{ inputs.skip_modules }}
       release_tag: ${{ inputs.release_tag }}
 
-  # Linux arm64. The jobs of kit.yml run in the debian:bookworm container of
-  # the kit (versions/<qt_version>.json), so that the kit needs only the
-  # glibc of Debian 12. The kit skips QtWebEngine and has no webengine job.
+  # Linux arm64 for Debian 12. The jobs of kit.yml run in the debian:bookworm
+  # container of the kit (versions/<qt_version>.json), so that the kit needs
+  # only the glibc of Debian 12. The webengine job runs outside the container,
+  # on a QTCI_RUNNER_WEBENGINE_GCC_ARM64 runner that runs Debian 12 on arm64
+  # itself (the stage command checks this). Without that variable, the kit has
+  # no QtWebEngine.
   gcc_arm64:
     needs: check-inputs
     if: inputs.kits == 'all' || contains(format(',{0},', inputs.kits), ',gcc_arm64,')
@@ -297,6 +312,32 @@ jobs:
       runner: ${{ vars.QTCI_RUNNER_GCC_ARM64 || 'ubuntu-24.04-arm' }}
       stage_minutes: ${{ fromJSON(vars.QTCI_STAGE_MINUTES || '350') }}
       docs: ${{ inputs.docs }}
+      webengine: ${{ inputs.webengine && vars.QTCI_RUNNER_WEBENGINE_GCC_ARM64 != '' }}
+      webengine_runner: ${{ vars.QTCI_RUNNER_WEBENGINE_GCC_ARM64 || '' }}
+      webengine_minutes: ${{ fromJSON(vars.QTCI_WEBENGINE_MINUTES || '1380') }}
+      skip_modules: ${{ inputs.skip_modules }}
+      release_tag: ${{ inputs.release_tag }}
+
+  # Linux arm64 for Ubuntu 24.04: the gcc_arm64 configuration, built directly
+  # on the arm64 runner, without a container, so that the kit links the
+  # libraries of Ubuntu 24.04 (for example ICU 74; gcc_arm64 has ICU 72).
+  # QtWebEngine needs a QTCI_RUNNER_WEBENGINE_GCC_ARM64_UBUNTU runner.
+  gcc_arm64_ubuntu:
+    needs: check-inputs
+    if: inputs.kits == 'all' || contains(format(',{0},', inputs.kits), ',gcc_arm64_ubuntu,')
+    uses: ./.github/workflows/kit.yml
+    concurrency:
+      group: qtci-gcc_arm64_ubuntu
+      cancel-in-progress: false
+    with:
+      kit: gcc_arm64_ubuntu
+      qt_version: ${{ inputs.qt_version }}
+      runner: ${{ vars.QTCI_RUNNER_GCC_ARM64_UBUNTU || 'ubuntu-24.04-arm' }}
+      stage_minutes: ${{ fromJSON(vars.QTCI_STAGE_MINUTES || '350') }}
+      docs: ${{ inputs.docs }}
+      webengine: ${{ inputs.webengine && vars.QTCI_RUNNER_WEBENGINE_GCC_ARM64_UBUNTU != '' }}
+      webengine_runner: ${{ vars.QTCI_RUNNER_WEBENGINE_GCC_ARM64_UBUNTU || '' }}
+      webengine_minutes: ${{ fromJSON(vars.QTCI_WEBENGINE_MINUTES || '1380') }}
       skip_modules: ${{ inputs.skip_modules }}
       release_tag: ${{ inputs.release_tag }}
 

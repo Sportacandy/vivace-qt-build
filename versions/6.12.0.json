@@ -1304,10 +1304,11 @@
       }
     },
     "gcc_arm64": {
-      "_comment": "Linux arm64, built in a Debian 12 (bookworm) container, so that the kit links the Debian 12 libraries (glibc 2.36, ICU 72) of Raspberry Pi OS (Legacy, 64-bit) based on Debian 12. It does not run on Ubuntu 24.04 or on the Raspberry Pi OS based on Debian 13. No docs and no FEATURE_clang: the arm64 libclang of Qt is not set up for this kit yet. Precompiled headers are off, because they need much memory on a 4-core runner.",
+      "_comment": "Linux arm64, built in a Debian 12 (bookworm) container, so that the kit links the Debian 12 libraries (glibc 2.36, ICU 72) of Raspberry Pi OS (Legacy, 64-bit) based on Debian 12. It does not run on Ubuntu 24.04 or on the Raspberry Pi OS based on Debian 13. No docs and no FEATURE_clang: the arm64 libclang of Qt is not set up for this kit yet. Precompiled headers are off, because they need much memory on a 4-core runner. QtWebEngine needs a QTCI_RUNNER_WEBENGINE_GCC_ARM64 runner that runs Debian 12 on arm64 itself (\"arch\"), because the webengine job does not run in the container.",
       "host": "linux",
       "toolchain": "gcc",
       "container": "debian:bookworm",
+      "arch": "aarch64",
       "ffmpeg_options": "linux_arm64",
       "prefix": "{prefix_root}/{qt_version}/gcc_arm64",
       "package": "qt-{qt_version}-oss-self-built-linux_arm64.tar.xz",
@@ -1335,8 +1336,70 @@
       "module_configure_args": [],
       "skip": [
         "qtactiveqt",
-        "qtopenapi",
-        "qtwebengine"
+        "qtopenapi"
+      ],
+      "post_install": {
+        "qtmultimedia": [
+          [
+            "{ffmpeg_dir}/lib/libavfilter.so.10",
+            "lib"
+          ],
+          [
+            "{ffmpeg_dir}/licenses/*",
+            "licenses/ffmpeg"
+          ]
+        ]
+      },
+      "env": {
+        "QT_QPA_PLATFORM": "minimal",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8"
+      },
+      "docs": false,
+      "docs_unavailable": "qdoc needs libclang, and the arm64 libclang of Qt is not set up for this kit yet",
+      "copy_example_sources": true,
+      "estimate_factor": 1.3,
+      "_module_installs": "Like installs of a module, for this kit only. The OpenSSL TLS backend: without OpenSSL, configure leaves it out without an error.",
+      "module_installs": {
+        "qtbase": [
+          "plugins/tls/*opensslbackend*"
+        ]
+      }
+    },
+    "gcc_arm64_ubuntu": {
+      "_comment": "Linux arm64 for Ubuntu 24.04: the same configuration as gcc_arm64, but built directly on the ubuntu-24.04-arm runner, without a container, so that the kit links the Ubuntu 24.04 libraries (glibc 2.39, ICU 74). It does not run on Debian 12; use gcc_arm64 there. No docs and no FEATURE_clang: the arm64 libclang of Qt is not set up for this kit yet. Precompiled headers are off, because they need much memory on a 4-core runner. QtWebEngine needs a QTCI_RUNNER_WEBENGINE_GCC_ARM64_UBUNTU runner, an Ubuntu 24.04 machine on arm64 (\"system\" and \"arch\" are checked by every stage job).",
+      "host": "linux",
+      "toolchain": "gcc",
+      "system": "ubuntu:24.04",
+      "arch": "aarch64",
+      "ffmpeg_options": "linux_arm64",
+      "prefix": "{prefix_root}/{qt_version}/gcc_arm64_ubuntu",
+      "package": "qt-{qt_version}-oss-self-built-linux_arm64_ubuntu.tar.xz",
+      "generator": "Ninja",
+      "configs": [
+        "Release"
+      ],
+      "qtbase": {
+        "mode": "cmake",
+        "args": []
+      },
+      "cmake_args": [
+        "-DFEATURE_accessibility=ON",
+        "-DBUILD_TESTING=OFF",
+        "-DINPUT_zlib=qt",
+        "-DINPUT_sbom=no",
+        "-DQT_GENERATE_SBOM=OFF",
+        "-DFFMPEG_DIR={ffmpeg_dir}",
+        "-DQT_DEPLOY_FFMPEG=TRUE",
+        "-DQT_BUILD_EXAMPLES=OFF",
+        "-DFEATURE_clang=OFF",
+        "-DQT_BUILD_DOCS=OFF",
+        "-DBUILD_WITH_PCH=OFF"
+      ],
+      "module_configure_args": [],
+      "skip": [
+        "qtactiveqt",
+        "qtopenapi"
       ],
       "post_install": {
         "qtmultimedia": [

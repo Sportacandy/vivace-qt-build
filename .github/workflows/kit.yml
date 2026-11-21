@@ -1182,8 +1182,8 @@ jobs:
           job-minutes: ${{ inputs.stage_minutes }}
 
   # Builds QtWebEngine and the modules that use it, after all stage jobs.
-  # Never in a container: qtci.py plan stops a container kit that offloads
-  # QtWebEngine.
+  # Never in a container. For a container kit, the runner must run the
+  # system of the container image itself; qtci.py stage checks this.
   webengine:
     needs: [prepare, ffmpeg, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12]
     if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.prepare.outputs.offload == 'true' }}

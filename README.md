@@ -62,7 +62,7 @@ installed Qt 6.12.0 headers say `LicenseRef-Qt-Commercial OR GPL-3.0-only`:
 | `qtcoap` | Qt CoAP |
 | `qtmqtt` | Qt MQTT |
 | `qtcanvaspainter` | Qt Canvas Painter, Qt Canvas 2D |
-| `qtwayland` (`gcc_64` and `gcc_arm64` only) | Qt Wayland Compositor. The Wayland client plugin is LGPL. |
+| `qtwayland` (`gcc_64`, `gcc_arm64`, and `gcc_arm64_ubuntu` only) | Qt Wayland Compositor. The Wayland client plugin is LGPL. |
 | `qtquickeffectmaker` | Qt Quick Effect Maker (`qqem`), a tool without the Qt GPL exception |
 
 The test libraries Qt Multimedia Test Lib, Qt Quick Test Utils, and Qt Quick
@@ -140,6 +140,7 @@ kit:
 | `mingw1310_64` | MinGW 13.1 in MSYS2, on the Windows runner of the kit | `ffmpeg-7.1.5-lgpl-win64-mingw.zip` |
 | `gcc_64` | GCC, on the Linux runner of the kit | `ffmpeg-7.1.5-lgpl-linux-x64.tar.xz` |
 | `gcc_arm64` | GCC, in the `debian:bookworm` container of the kit | Not released. The kit archive and the release have its source. |
+| `gcc_arm64_ubuntu` | GCC, on the Linux arm64 runner of the kit | Not released. The kit archive and the release have its source. |
 | `macos` | Clang, on the macOS runner of the kit (arm64 only) | `ffmpeg-7.1.5-lgpl-macos-arm64.tar.xz` |
 | `android_arm64_v8a`, `android_x86_64` | The Android NDK, on `ubuntu-24.04` | Not released |
 
@@ -192,7 +193,7 @@ Hardware and operating system encoders:
 |-----|----------|
 | `msvc2022_64`, `mingw1310_64` | NVIDIA NVENC: `h264_nvenc`, `hevc_nvenc`, `av1_nvenc`. Intel QSV: `h264_qsv`, `hevc_qsv`, `av1_qsv`, `vp9_qsv`, `mpeg2_qsv`, `mjpeg_qsv`. AMD AMF: `h264_amf`, `hevc_amf`, `av1_amf`. Media Foundation: `h264_mf`, `hevc_mf`, `aac_mf`, `ac3_mf`, `mp3_mf`. Direct3D 12, `msvc2022_64` only: `hevc_d3d12va`. |
 | `gcc_64` | NVIDIA NVENC: `h264_nvenc`, `hevc_nvenc`, `av1_nvenc`. Intel QSV: `h264_qsv`, `hevc_qsv`, `av1_qsv`. VA-API: `h264_vaapi`, `hevc_vaapi`, `av1_vaapi`. |
-| `gcc_arm64` | VA-API: `h264_vaapi`, `hevc_vaapi`, `av1_vaapi`. The `linux_arm64` option set (`ffmpeg_options` of the kit) leaves out QSV, which is x86 only, and NVENC, because the target boards have no NVIDIA GPU. Raspberry Pi has no VA-API driver, and the common options turn off V4L2 M2M, so the kit has no hardware encoder on Raspberry Pi. |
+| `gcc_arm64`, `gcc_arm64_ubuntu` | VA-API: `h264_vaapi`, `hevc_vaapi`, `av1_vaapi`. The `linux_arm64` option set (`ffmpeg_options` of the kit) leaves out QSV, which is x86 only, and NVENC, because the target boards have no NVIDIA GPU. Raspberry Pi has no VA-API driver, and the common options turn off V4L2 M2M, so the kit has no hardware encoder on Raspberry Pi. |
 | `macos` | VideoToolbox: `h264_videotoolbox`, `hevc_videotoolbox`. |
 | `android_arm64_v8a`, `android_x86_64` | MediaCodec encoders of FFmpeg. The Android FFmpeg has no programs, so the checks do not list them. |
 
@@ -256,7 +257,7 @@ kits, which have no programs.
    |-----|----------|
    | `msvc2022_64`, `mingw1310_64` | `h264_nvenc`, `hevc_nvenc`, `av1_nvenc`, `h264_qsv`, `hevc_qsv`, `av1_qsv`, `h264_amf`, `hevc_amf`, `av1_amf`, `h264_mf`, `hevc_mf`, `mpeg2video` |
    | `gcc_64` | `h264_nvenc`, `hevc_nvenc`, `av1_nvenc`, `h264_qsv`, `hevc_qsv`, `av1_qsv`, `h264_vaapi`, `hevc_vaapi`, `av1_vaapi`, `mpeg2video` |
-   | `gcc_arm64` | `h264_vaapi`, `hevc_vaapi`, `av1_vaapi`, `mpeg2video` |
+   | `gcc_arm64`, `gcc_arm64_ubuntu` | `h264_vaapi`, `hevc_vaapi`, `av1_vaapi`, `mpeg2video` |
    | `macos` | `h264_videotoolbox`, `hevc_videotoolbox`, `mpeg2video` |
 
 3. `ffmpeg -hide_banner -decoders` must list `libaribcaption`, `png`, and the decoders
@@ -368,6 +369,7 @@ kit archive.
 | `android_x86_64` | `windows-2022` | `opensource-qtmake6120-android-x86_64-on-mingw-1310.bat` | `qt-6.12.0-oss-self-built-android_x86_64.zip` |
 | `gcc_64` | `ubuntu-24.04` | `6.11.1/qtmake6.sh` | `qt-6.12.0-oss-self-built-linux_x64.tar.xz` |
 | `gcc_arm64` | `ubuntu-24.04-arm`, in a `debian:bookworm` container | None | `qt-6.12.0-oss-self-built-linux_arm64.tar.xz` |
+| `gcc_arm64_ubuntu` | `ubuntu-24.04-arm` | None | `qt-6.12.0-oss-self-built-linux_arm64_ubuntu.tar.xz` |
 | `macos` | `macos-15` (arm64) | `6.11.1/qtmake6-macos.sh` | `qt-6.12.0-oss-self-built-macos_arm64.tar.xz` |
 
 Each archive has one top-level directory, `6.12.0/<kit>/`. Extract it into the
@@ -387,7 +389,16 @@ OS based on Debian 12. Other distributions do not have the same library
 versions. Examples are Ubuntu 24.04 and the current Raspberry Pi OS, which is
 based on Debian 13 "trixie" and has ICU 76. The first step of each of these jobs installs
 `sudo`, Git, curl, xz, zstd, and a Python 3.12 into the container.
-The kit has no QtWebEngine and no docs. Read [Known limitations](#known-limitations).
+The kit has no docs. Its QtWebEngine needs a self-hosted runner that runs
+Debian 12 on arm64; read [QtWebEngine](#qtwebengine) and
+[Known limitations](#known-limitations).
+
+The `gcc_arm64_ubuntu` kit has the same configuration as `gcc_arm64`, but
+its jobs run directly on the `ubuntu-24.04-arm` runner, without a
+container. So the kit links the libraries of Ubuntu 24.04, for example
+glibc 2.39 and ICU 74, and runs on Ubuntu 24.04 on arm64, but not on
+Debian 12. It also has no docs, and its QtWebEngine needs a self-hosted
+Ubuntu 24.04 arm64 runner.
 
 The configure options of each kit are in
 [`versions/6.12.0.json`](versions/6.12.0.json), under `kits`. They follow the
@@ -432,8 +443,8 @@ Compare the result with the `.sha256` file before you use it.
 |-------|---------|-------------|
 | `qt_version` | `6.12.0` | Qt version. The file `versions/<qt_version>.json` must exist. |
 | `kits` | `all` | Kits to build. |
-| `docs` | `kit-default` | `on` or `off` overrides the `docs` value of each kit. All kits except `gcc_arm64` default to `on`, like the local scripts. |
-| `webengine` | `false` | Build QtWebEngine for `msvc2022_64`, `gcc_64`, and `macos`. It needs a runner without the 6-hour limit. Read [QtWebEngine](#qtwebengine) first. |
+| `docs` | `kit-default` | `on` or `off` overrides the `docs` value of each kit. All kits except `gcc_arm64` and `gcc_arm64_ubuntu` default to `on`, like the local scripts. |
+| `webengine` | `false` | Build QtWebEngine for `msvc2022_64`, `gcc_64`, and `macos`, and for `gcc_arm64` and `gcc_arm64_ubuntu` when their `QTCI_RUNNER_WEBENGINE_<KIT>` variable is set (without it, these two ignore the input). It needs a runner without the 6-hour limit. Read [QtWebEngine](#qtwebengine) first. |
 | `skip_modules` | empty | Comma-separated modules to leave out, for example `qtcoap,qtgrpc`. |
 | `release_tag` | empty | Upload the archives to this release. Empty means artifacts only. It must be a valid tag name that starts with a letter or digit and has only letters, digits, `.`, `_`, `+`, and `-`. |
 | `host_run_id` | empty | For Android kits only: the ID of an earlier run that built `mingw1310_64`. Empty means this run. |
@@ -598,10 +609,10 @@ them in **Settings** > **Secrets and variables** > **Actions** > **Variables**.
 |----------|---------|---------|
 | `QTCI_RUNNER_<KIT>` | not set | One kit, for example `QTCI_RUNNER_MSVC2022_64`. |
 | `QTCI_RUNNER_WINDOWS` | `windows-2022` | `msvc2022_64`, `mingw1310_64`, both Android kits. |
-| `QTCI_RUNNER_LINUX` | `ubuntu-24.04` | `gcc_64`. Not `gcc_arm64`: only `QTCI_RUNNER_GCC_ARM64` sets its runner, and the default is `ubuntu-24.04-arm`. The runner of `gcc_arm64` must be a GitHub-hosted arm64 runner. |
+| `QTCI_RUNNER_LINUX` | `ubuntu-24.04` | `gcc_64`. Not the arm64 kits: only `QTCI_RUNNER_GCC_ARM64` and `QTCI_RUNNER_GCC_ARM64_UBUNTU` set their runners, and the default is `ubuntu-24.04-arm`. The runner of `gcc_arm64` must be a GitHub-hosted arm64 runner. |
 | `QTCI_RUNNER_MACOS` | `macos-15` | `macos`. |
 | `QTCI_STAGE_MINUTES` | `350` | The timeout of each stage job. |
-| `QTCI_RUNNER_WEBENGINE_<KIT>` | not set | QtWebEngine and Qt WebView of one kit: `MSVC2022_64`, `GCC_64`, or `MACOS`. Read [QtWebEngine](#qtwebengine). |
+| `QTCI_RUNNER_WEBENGINE_<KIT>` | not set | QtWebEngine and Qt WebView of one kit: `MSVC2022_64`, `GCC_64`, `MACOS`, `GCC_ARM64`, or `GCC_ARM64_UBUNTU`. Read [QtWebEngine](#qtwebengine). |
 | `QTCI_WEBENGINE_MINUTES` | `1380` | The timeout of the `webengine` job. |
 | `QTCI_PREFIX_ROOT` | `C:/Qt`, `/opt/Qt`, `~/Qt` | The prefix root. Required as a runner environment variable on self-hosted runners; the defaults apply only to GitHub-hosted runners. |
 | `QTCI_WORK` | `C:/w`, `~/w` | The work directory for sources and build directories. Required as a runner environment variable on self-hosted runners; the defaults apply only to GitHub-hosted runners. |
@@ -661,13 +672,18 @@ To build QtWebEngine on a self-hosted runner:
 2. Set the repository variable for the kit to the labels of that runner, for
    example `QTCI_RUNNER_WEBENGINE_MSVC2022_64` to
    `["self-hosted", "windows", "x64"]`. The variables for the other kits are
-   `QTCI_RUNNER_WEBENGINE_GCC_64` and `QTCI_RUNNER_WEBENGINE_MACOS`.
+   `QTCI_RUNNER_WEBENGINE_GCC_64`, `QTCI_RUNNER_WEBENGINE_MACOS`,
+   `QTCI_RUNNER_WEBENGINE_GCC_ARM64`, and
+   `QTCI_RUNNER_WEBENGINE_GCC_ARM64_UBUNTU`.
 3. Optional: set `QTCI_WEBENGINE_MINUTES` to the timeout of the `webengine`
    job. The default is `1380` (23 hours).
 4. Run **Build Qt** with `webengine` set to `true`.
 
 If the variable of a kit is not set, the stage jobs build QtWebEngine. With
 the default stage time, `check-inputs` stops the run before any build starts.
+The two arm64 kits are different: without their variable, they build no
+QtWebEngine and ignore `webengine`, so that a run of all kits works without
+an arm64 QtWebEngine runner.
 
 The `webengine` job does not split its work into stages. With the default
 1380 minutes, the QtWebEngine build of `msvc2022_64` (about 50 hours on 4
@@ -720,6 +736,21 @@ built. Give the runner the same toolchain as that GitHub-hosted runner:
 | `msvc2022_64` | Windows x64, Visual Studio 2022 with the x64 C++ tools and the C++ CMake tools, the Windows SDK with the Debugging Tools for Windows, Git for Windows (the job uses its bash), and Chocolatey. The job installs Ninja, zstd, 7-Zip, OpenSSL, WinFlexBison, gperf, and Node.js (if it is missing) with Chocolatey. An installed Node.js must be version 20 or later. |
 | `gcc_64` | Ubuntu 24.04 x64, `sudo` without a password, and Node.js 20 or later as `node` in `PATH`. The `nodejs` package of Ubuntu 24.04 is version 18, so install a newer one, for example from NodeSource. The job installs the build packages with `apt-get`, and also CMake, the GCC toolchain, and Git if they are missing. |
 | `macos` | macOS arm64 with Xcode and Homebrew. The job installs the build packages with Homebrew, and also CMake and Node.js if they are missing. An installed Node.js must be version 20 or later. |
+| `gcc_arm64` | Debian 12 (bookworm) on arm64, for example in a Linux VM on an Apple silicon Mac. The stage jobs build in the `debian:bookworm` container, but the `webengine` job runs on the runner itself. It stops if `/etc/os-release` is not Debian 12 or the machine is not `aarch64`. Also `sudo` without a password, Node.js 20 or later as `node` in `PATH` (the `nodejs` package of Debian 12 is version 18), and a Python 3.12 in `QTCI_PYTHON` (see below). The job installs the build packages with `apt-get`. Set `QTCI_PREFIX_ROOT` to `/opt/Qt`, the prefix root of the container jobs. |
+| `gcc_arm64_ubuntu` | Ubuntu 24.04 on arm64, for example in a Linux VM on an Apple silicon Mac, with the same requirements as `gcc_64`. Every stage job of this kit, and its `webengine` job, stops if `/etc/os-release` is not Ubuntu 24.04 or the machine is not `aarch64` (`system` and `arch` of the kit). |
+
+`actions/setup-python` has Python builds for Ubuntu only. On another Linux,
+such as Debian 12, set the `QTCI_PYTHON` environment variable of the runner
+to the `bin` directory of a Python 3.12 that has `python` and `python3`.
+Make the whole Python installation writable for the runner user, because
+the job installs `html5lib` into it with pip. For example, extract the
+Python 3.12 that the container jobs use (`PYTHON_URL` in
+`.github/workflows/kit.yml`) with
+`sudo mkdir -p /opt/python3.12 && sudo tar -xzf <archive> -C /opt/python3.12 --strip-components=1`,
+then run `sudo chown -R "$USER" /opt/python3.12` and
+`ln -s python3 /opt/python3.12/bin/python`, and set
+`QTCI_PYTHON=/opt/python3.12/bin`. Chromium needs much memory: set
+`QTCI_JOBS` to about the memory of the machine in GB divided by 4.
 
 On Windows, put the `bin` directory of Git for Windows before
 `C:\Windows\System32` in the `PATH` of the runner. Otherwise the job can use
@@ -842,13 +873,18 @@ Build results:
   its tag. Android OpenSSL is the newest commit when `prepare` runs. The FFmpeg
   sources have checksums, but MSYS2 and the system packages of the `ffmpeg`
   job have no fixed version.
-- The `gcc_arm64` kit has no QtWebEngine, no docs, and no Clang-based tools
-  (`FEATURE_clang` is off). `qdoc` needs libclang. Qt has a prebuilt
-  libclang for Linux on arm64, but this repository does not set it up for
-  the kit yet. With `docs` set to `on`, the plan leaves out the
-  docs of this kit and prints a note (`docs_unavailable` of the kit). The
-  `webengine` job never runs in a container, so the plan stops if a
-  container kit offloads QtWebEngine.
+- The `gcc_arm64` and `gcc_arm64_ubuntu` kits have no docs and no
+  Clang-based tools (`FEATURE_clang` is off). `qdoc` needs libclang. Qt has
+  a prebuilt libclang for Linux on arm64, but this repository does not set
+  it up for these kits yet. With `docs` set to `on`, the plan leaves out the
+  docs of these kits and prints a note (`docs_unavailable` of the kit).
+- The `webengine` job never runs in a container. For `gcc_arm64`, it runs on
+  a runner that must run Debian 12 on arm64 itself. The stage command checks
+  the system name, the release, and the machine type (`container`, `system`,
+  and `arch` of the kit), but not the versions of the installed packages.
+  It checks them only when the job reaches it, after the package
+  installation and the state download. A Debian 12 that is not up to date can build
+  QtWebEngine with older libraries than the container jobs.
 - The runner of `gcc_arm64` must be a GitHub-hosted Linux arm64 runner, for
   example `ubuntu-24.04-arm`. On a self-hosted runner, the Build FFmpeg
   action only checks for the build packages, and a new container has none
@@ -858,8 +894,8 @@ Build results:
   or a job timeout does not send a signal to `qtci.py`. The runner stops the
   processes when it removes the container, and the stage saves nothing, the
   same as on the host. The Build FFmpeg workflow
-  does not release the FFmpeg of `gcc_arm64`; the kit archive contains it,
-  and the release has its source.
+  does not release the FFmpeg of `gcc_arm64` and `gcc_arm64_ubuntu`; the kit
+  archives contain it, and the release has its source.
 - The FFmpeg of the Windows kits needs no runtime DLL that the kit does not
   have. MSVC uses the static C runtime (`/MT`), like the FFmpeg of Qt. MinGW
   links `libgcc`, `libstdc++`, and `libwinpthread` statically, and FFmpeg
@@ -1101,7 +1137,8 @@ The workflows follow the local scripts, with these changes:
 
 The scripts for Linux and macOS are for Qt 6.11.1. Nobody has built Qt 6.12.0
 with them yet, so the `gcc_64` and `macos` kits are less tested. The
-`gcc_arm64` kit has no local script, and nobody has built it yet.
+`gcc_arm64` and `gcc_arm64_ubuntu` kits have no local script, and nobody
+has built them yet.
 
 ## Add a Qt version
 

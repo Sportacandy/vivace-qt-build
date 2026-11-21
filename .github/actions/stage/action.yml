@@ -83,9 +83,37 @@ runs:
       shell: bash
       run: echo "QTCI_STAGE_START=${QTCI_JOB_START:-$(date +%s)}" >> "$GITHUB_ENV"
 
+    # A self-hosted runner can name its own Python 3.12 in QTCI_PYTHON: the
+    # directory of its python and python3 programs. setup-python has builds
+    # for Ubuntu only, so a Debian runner (the webengine runner of gcc_arm64)
+    # needs this. A variable of the runner's .env file is not in the env
+    # context of "if:", so this step records the choice in QTCI_OWN_PYTHON.
+    - name: Use the Python 3.12 of the runner
+      if: env.QTCI_CONTAINER != 'true'
+      shell: bash
+      run: |
+        if [ -z "${QTCI_PYTHON:-}" ]; then
+          exit 0
+        fi
+        if ! ver=$("$QTCI_PYTHON/python3" -c 'import sys; print("%d.%d" % sys.version_info[:2])'); then
+          echo "::error::QTCI_PYTHON is $QTCI_PYTHON, but $QTCI_PYTHON/python3 does not run."
+          exit 1
+        fi
+        if [ "$ver" != 3.12 ]; then
+          echo "::error::QTCI_PYTHON must name a Python 3.12, but $QTCI_PYTHON/python3 is Python $ver."
+          exit 1
+        fi
+        if [ ! -e "$QTCI_PYTHON/python" ]; then
+          echo "::error::$QTCI_PYTHON has no python program, which the workflow steps call. Add it: ln -s python3 $QTCI_PYTHON/python"
+          exit 1
+        fi
+        echo "$QTCI_PYTHON" >> "$GITHUB_PATH"
+        echo "QTCI_OWN_PYTHON=true" >> "$GITHUB_ENV"
+        echo "Python $ver from $QTCI_PYTHON"
+
     # A container has the Python 3.12 of "Prepare the container" (kit.yml).
     - uses: actions/setup-python@v7
-      if: env.QTCI_CONTAINER != 'true'
+      if: env.QTCI_CONTAINER != 'true' && env.QTCI_OWN_PYTHON != 'true'
       with:
         python-version: "3.12"
 

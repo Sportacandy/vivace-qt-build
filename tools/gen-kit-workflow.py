@@ -343,8 +343,8 @@ STAGE = r'''
 
 TAIL = r'''
   # Builds QtWebEngine and the modules that use it, after all stage jobs.
-  # Never in a container: qtci.py plan stops a container kit that offloads
-  # QtWebEngine.
+  # Never in a container. For a container kit, the runner must run the
+  # system of the container image itself; qtci.py stage checks this.
   webengine:
     needs: [prepare, ffmpeg, {all_stages}]
     if: ${{{{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.prepare.outputs.offload == 'true' }}}}
