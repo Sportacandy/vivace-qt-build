@@ -101,7 +101,8 @@ This README and the code use these terms with one meaning each.
 
 ## The patches
 
-The patches are in [`patches/6.12.0/qtmultimedia/`](patches/6.12.0/qtmultimedia/).
+The Qt Multimedia patches are in
+[`patches/6.12.0/qtmultimedia/`](patches/6.12.0/qtmultimedia/).
 They are copies of the files in the Vivace repository at commit `2045359`
 ("Bump Qt to 6.12.0"), with one change: the license. The files that the
 patches add are under `LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`, as
@@ -114,6 +115,13 @@ patch file starts with a description of the problem and the change.
 | `qtmultimedia-deinterlace.patch` | Adds Yadif and Bwdif deinterlacing with an FFmpeg `avfilter` graph. |
 | `qtmultimedia-subtitle-bitmap.patch` | Fixes a crash on bitmap subtitles (DVD, PGS, DVB) and adds bitmap subtitle display. |
 | `qtmultimedia-wsola-pitch-compensation.patch` | Uses WSOLA (SoundTouch) for pitch compensation above 1x playback speed. |
+
+One patch in [`patches/6.12.0/qtwebengine/`](patches/6.12.0/qtwebengine/) fixes
+the build, and does not change Qt WebEngine:
+
+| Patch | Change |
+|-------|--------|
+| `qtwebengine-docs-target-guard.patch` | Adds the attribution files to the docs targets only when the docs targets exist. Without it, the QtWebEngine configure step stops on a kit without docs, for example `gcc_arm64`. |
 
 The build applies every `patches/<qt_version>/<module>/*.patch` file to its
 module in file-name order with `git apply`. Each kit archive also contains the

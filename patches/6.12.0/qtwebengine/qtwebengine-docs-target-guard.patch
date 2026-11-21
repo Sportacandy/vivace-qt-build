@@ -1,0 +1,61 @@
+Qt module:   qtwebengine
+Base commit: d4735ce2f841ffbe7cbac9ee7fd954f00514825f (qtwebengine has no v6.12.0 tag)
+Applies to:  src/core/api/CMakeLists.txt, src/core/tools/webenginedriver/CMakeLists.txt,
+             src/pdf/CMakeLists.txt
+
+Why: these files make the docs targets prepare_docs_WebEngineCore and
+prepare_docs_Pdf depend on the generated attribution files. Qt creates
+the docs targets only when it builds docs (QT_BUILD_DOCS=ON). Without
+docs, add_dependencies() names a target that does not exist, and CMake
+stops: "Cannot add target-level dependencies to non-existent target".
+The arm64 kits (gcc_arm64, gcc_arm64_ubuntu) have no docs, because qdoc
+needs libclang, so their QtWebEngine build stops at configure.
+
+The patch adds the dependency only when the docs target exists. Kits that
+build docs get the same dependency as before.
+
+diff --git a/src/core/api/CMakeLists.txt b/src/core/api/CMakeLists.txt
+index ed57aa1..ff9114d 100644
+--- a/src/core/api/CMakeLists.txt
++++ b/src/core/api/CMakeLists.txt
+@@ -131,7 +131,9 @@ add_code_attributions_target(
+     BUILDDIR ${buildDir}/${config}/${arch}
+ )
+ add_dependencies(generate_chromium_attributions run_core_GnDone)
+-add_dependencies(prepare_docs_WebEngineCore generate_chromium_attributions)
++if(TARGET prepare_docs_WebEngineCore)
++    add_dependencies(prepare_docs_WebEngineCore generate_chromium_attributions)
++endif()
+ 
+ ##
+ #  WEBENGINECORE RESOURCES
+diff --git a/src/core/tools/webenginedriver/CMakeLists.txt b/src/core/tools/webenginedriver/CMakeLists.txt
+index d718e13..88e37a3 100644
+--- a/src/core/tools/webenginedriver/CMakeLists.txt
++++ b/src/core/tools/webenginedriver/CMakeLists.txt
+@@ -25,7 +25,9 @@ if(QT_FEATURE_webenginedriver)
+         BUILDDIR ${buildDir}/${config}/${arch}
+     )
+     add_dependencies(generate_webenginedriver_attributions run_core_GnDone)
+-    add_dependencies(prepare_docs_WebEngineCore generate_webenginedriver_attributions)
++    if(TARGET prepare_docs_WebEngineCore)
++        add_dependencies(prepare_docs_WebEngineCore generate_webenginedriver_attributions)
++    endif()
+ 
+     ##
+     #  INSTALL
+diff --git a/src/pdf/CMakeLists.txt b/src/pdf/CMakeLists.txt
+index be755d1..e756cfa 100644
+--- a/src/pdf/CMakeLists.txt
++++ b/src/pdf/CMakeLists.txt
+@@ -68,7 +68,9 @@ add_code_attributions_target(
+     BUILDDIR ${buildDir}/${config}/${arch}
+ )
+ add_dependencies(generate_pdf_attributions run_pdf_GnDone)
+-add_dependencies(prepare_docs_Pdf generate_pdf_attributions)
++if(TARGET prepare_docs_Pdf)
++    add_dependencies(prepare_docs_Pdf generate_pdf_attributions)
++endif()
+ 
+ ##
+ #   TOOLCHAIN SETUP

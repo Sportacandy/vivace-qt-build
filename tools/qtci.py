@@ -1815,7 +1815,7 @@ def cmd_package_ffmpeg(args) -> None:
 # Items
 # --------------------------------------------------------------------------
 
-def clone_module(cfg: dict, module: str, dest: Path) -> None:
+def clone_module(cfg: dict, module: str, dest: Path, submodules: bool = True) -> None:
     info = cfg["modules"].get(module) or cfg["extra_modules"][module]
     url = info.get("url") or f"{cfg['git_base']}/{module}.git"
     rmtree(dest)
@@ -1830,7 +1830,9 @@ def clone_module(cfg: dict, module: str, dest: Path) -> None:
             raise RuntimeError(f"git fetch failed for {module}")
         time.sleep(attempt * 15)
     run(["git", "checkout", "--quiet", "--detach", "FETCH_HEAD"], cwd=dest)
-    if (dest / ".gitmodules").is_file():
+    # check-patches leaves the submodules out: the patches change only the
+    # module itself, and the submodule of qtwebengine is Chromium (gigabytes).
+    if submodules and (dest / ".gitmodules").is_file():
         run(["git", "submodule", "update", "--init", "--recursive", "--depth", "1",
              "--jobs", "4"], cwd=dest)
 
@@ -2889,7 +2891,7 @@ def cmd_check_patches(args) -> None:
         if module not in cfg["modules"] and module not in cfg.get("extra_modules", {}):
             die(f"patches/{cfg['qt_version']}/{module} is not a module of Qt {cfg['qt_version']}")
         group(f"Apply patches to {module}")
-        clone_module(cfg, module, work / module)  # applies the patches
+        clone_module(cfg, module, work / module, submodules=False)  # applies the patches
         endgroup()
         rmtree(work / module)
     log(f"All patches apply to Qt {cfg['qt_version']}: {', '.join(modules)}")
