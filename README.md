@@ -1273,10 +1273,21 @@ Security and other:
 - `QTCI_STAGE_MINUTES` and `QTCI_WEBENGINE_MINUTES` must be whole numbers.
   `check-inputs` does not check this, and the stage job fails.
 - `tools/qtci.py` also reads `QTCI_JOBS` (parallel build jobs, default: the
-  CPU count), `QTCI_DOC_JOBS` (parallel docs jobs, default 2), and
-  `QTCI_MSVC_VERSION_RANGE` (the Visual Studio versions to use, default
-  `[17.0,18.0)`). The workflows do not set them. `setup-kit` sets
-  `QTCI_DEPS`, which nothing reads.
+  CPU count). For QtWebEngine, it gives the job count of the module
+  (`QTCI_JOBS`, capped by `module_jobs` of the kit) to the Chromium build in
+  `NINJAFLAGS` (`-j<count>`). If the runner sets a value for `NINJAFLAGS`,
+  the build uses that value instead; include `-j` in it.
+  `tools/qtci.py` also reads `QTCI_DOC_JOBS` (parallel docs jobs,
+  default 2), and `QTCI_MSVC_VERSION_RANGE` (the Visual Studio versions to
+  use, default `[17.0,18.0)`). The workflows do not set `QTCI_JOBS`,
+  `NINJAFLAGS`, `QTCI_DOC_JOBS`, or `QTCI_MSVC_VERSION_RANGE`.
+  `setup-kit` sets `QTCI_DEPS`, which nothing reads.
+- During the QtWebEngine build, the outer ninja can run other jobs while the
+  Chromium ninja runs its `-j<count>` jobs. For a short time, up to about
+  twice the job count can run.
+- A QtWebEngine build that continues in a kept build directory configures
+  again, so `gn gen` runs again before ninja continues. This adds some
+  minutes that the stage estimate does not count.
 - On macOS, `package` compresses the archive on one CPU core.
 - The source archive of a **Build FFmpeg** release has the build scripts and
   `recipe.json`, but not `versions/<qt>.json` or the workflow files.

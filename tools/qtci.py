@@ -2222,12 +2222,26 @@ def run_build_item(cfg: dict, kit: dict, module: str, env: dict,
     src, build = work / "s" / module, work / "b" / module
     values = placeholders(cfg, kit)
     prefix = Path(values["prefix"])
+    jobs = jobs_for(kit, module)
+    if module == "qtwebengine" and not env.get("NINJAFLAGS"):
+        # QtWebEngine runs the Chromium ninja with only $ENV{NINJAFLAGS}
+        # (add_ninja_command in its cmake/Functions.cmake), so the
+        # --parallel of cmake --build does not limit it. Without -j, that
+        # ninja runs nproc + 2 jobs, and the compilers can use all memory.
+        # CMake reads the variable when it configures, so set it for the
+        # configure step and the build.
+        env = dict(env, NINJAFLAGS=f"-j{jobs}")
     RESUMED_BUILD = can_resume(cfg, module, prefix)
     if RESUMED_BUILD:
         # An earlier job on this runner stopped or failed this build after
         # its configure step. Ninja continues it; outputs of killed commands
         # are rebuilt.
         log(f"Continuing the build of {module} in {build}")
+        if module == "qtwebengine":
+            # The build directory can have the ninja command of an earlier
+            # configure step with other flags. Configure again, so that
+            # the command has the NINJAFLAGS of this job.
+            run(["cmake", "."], cwd=build, env=env)
     else:
         # A marker that is left without its build (a job cancelled during
         # the clone) must not make a later job continue a partial source.
@@ -2239,8 +2253,7 @@ def run_build_item(cfg: dict, kit: dict, module: str, env: dict,
     # With Ninja Multi-Config, Qt sets CMAKE_DEFAULT_CONFIGS to "all"
     # (qt_auto_detect_cmake_config), so this builds every configuration that
     # install_module installs.
-    build_with_retry(["cmake", "--build", ".", "--parallel", jobs_for(kit, module)],
-                     build, env)
+    build_with_retry(["cmake", "--build", ".", "--parallel", jobs], build, env)
     install_module(kit, build, env)
     added = prefix_paths(prefix) - (before or set())
     skipped = (qt_skipped_build(build)
