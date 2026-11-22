@@ -53,6 +53,21 @@ jobs:
             done
           done
 
+      - name: Plan every GPL FFmpeg
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # The kits of the GPL FFmpeg release (toolchains.ffmpeg.gpl.release).
+          for version_file in versions/*.json; do
+            version=$(basename "$version_file" .json)
+            kits=$(python -c "import json,sys;print(' '.join(json.load(open(sys.argv[1]))['toolchains']['ffmpeg'].get('gpl', {}).get('release', {})))" "$version_file")
+            for kit in $kits; do
+              python tools/qtci.py plan --qt-version "$version" --kit "$kit" --ffmpeg-license gpl \
+                --state "$RUNNER_TEMP/plan-gpl-$version-$kit" > /dev/null
+              echo "planned the GPL FFmpeg of $version $kit"
+            done
+          done
+
   patches:
     runs-on: ubuntu-24.04
     steps:

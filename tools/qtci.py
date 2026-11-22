@@ -825,34 +825,55 @@ def ffmpeg_options(kit: dict) -> str:
 
 
 # The files that control the FFmpeg build. Their SHA-256 values are part of
-# the recipe, and the source archives contain them.
+# the recipe, and the source archives contain them. ffmpeg.yml selects the
+# license and the container of a Build FFmpeg run.
 FFMPEG_SCRIPTS = ("tools/build-ffmpeg.sh", "tools/qtci.py",
-                  ".github/actions/build-ffmpeg/action.yml")
+                  ".github/actions/build-ffmpeg/action.yml",
+                  ".github/workflows/ffmpeg.yml")
 
 
-def ffmpeg_recipe(cfg: dict, kit: dict) -> dict:
-    """Everything that decides the FFmpeg of a kit. Its hash is the cache key."""
+def ffmpeg_recipe(cfg: dict, kit: dict, license: str = "lgpl") -> dict:
+    """Everything that decides the FFmpeg of a kit. Its hash is the cache key.
+
+    license "gpl" adds the parts, configure options, and checks of
+    toolchains.ffmpeg.gpl. Only the Build FFmpeg workflow asks for it; a kit
+    always contains the LGPL FFmpeg.
+    """
     tools = cfg["toolchains"]["ffmpeg"]
     target = ffmpeg_target(kit)
     options = ffmpeg_options(kit)
     if options not in tools["parts"]:
         die(f"unknown ffmpeg_options {options}")
+    if license not in FFMPEG_LICENSES:
+        die(f"unknown FFmpeg license {license}; use one of {', '.join(FFMPEG_LICENSES)}")
+    gpl = tools["gpl"] if license == "gpl" else None
+    if gpl is not None and options not in gpl["parts"]:
+        die(f"there is no GPL FFmpeg for the {options} target (toolchains.ffmpeg.gpl.parts)")
 
     def source(info: dict) -> dict:
         url = info["url"].format(version=info["version"])
         # "file" names a download whose URL ends with only a tag (v1.2.3.tar.gz).
         return {"version": info["version"], "sha256": info["sha256"], "url": url,
                 "file": info.get("file", url.rsplit("/", 1)[1]).format(version=info["version"]),
-                "license": info["license"], "notices": info.get("notices", [])}
+                "license": info["license"], "notices": info.get("notices", []),
+                **({"extra_licenses": info["extra_licenses"]} if "extra_licenses" in info else {})}
 
+    configure = tools["configure"]["common"] + tools["configure"].get(options, [])
+    checks = tools["checks"].get(options, {})
+    if gpl is not None:
+        configure += gpl["configure"]["common"] + gpl["configure"].get(options, [])
+        extra = gpl["checks"].get(options, {})
+        checks = {kind: checks.get(kind, []) + [n for n in extra.get(kind, [])
+                                                 if n not in checks.get(kind, [])]
+                  for kind in sorted(set(checks) | set(extra))}
     recipe = {
         "target": target,
         "ffmpeg": source(tools),
         "meson": tools["meson"],
         "ninja": tools["ninja"],
         "cmake": tools["cmake"],
-        "configure": tools["configure"]["common"] + tools["configure"].get(options, []),
-        "checks": tools["checks"].get(options, {}),
+        "configure": configure,
+        "checks": checks,
         # Every script of the FFmpeg build: a change of one must not reuse a
         # cached FFmpeg, and the source archive ships these exact files.
         "scripts": {rel: file_digest(ROOT / rel, "sha256") for rel in FFMPEG_SCRIPTS},
@@ -863,12 +884,23 @@ def ffmpeg_recipe(cfg: dict, kit: dict) -> dict:
         recipe["options"] = options
     for part in tools["parts"][options]:
         recipe[part] = source(tools[part])
+    if gpl is not None:
+        # Only for GPL: an LGPL recipe gets no new keys. (Its cache key still
+        # changes with each change of the scripts, whose digests it contains.)
+        recipe["license"] = "gpl"
+        recipe["ffmpeg"]["license"] = gpl["license"]
+        for part in gpl["parts"][options]:
+            recipe[part] = source(tools[part])
     if target != "android":
         # kit_environment gives these to the FFmpeg build (CC, CXX, PATH).
         recipe["kit_env"] = {k: kit[k] for k in ("env", "env_unset", "path_prepend",
                                                  "path_remove") if k in kit}
     if target == "mingw":
         recipe["mingw_licenses"] = tools["mingw_licenses"]
+        if "zlib" in recipe:
+            # The GPL MinGW FFmpeg links the zlib part, not the zlib of MinGW.
+            recipe["mingw_licenses"] = [rel for rel in recipe["mingw_licenses"]
+                                        if not rel.startswith("zlib/")]
         # The compiler of the MinGW FFmpeg and the source of its runtime libraries.
         recipe["mingw"] = cfg["toolchains"]["mingw"]
     if target == "android":
@@ -937,6 +969,12 @@ def cmd_plan(args) -> None:
                     f"{budget:.0f} min.{hint} Or set QTCI_STAGE_MINUTES to a larger value "
                     "and use a runner without the 6-hour limit.")
 
+    if args.ffmpeg_license == "gpl":
+        gpl_parts = cfg["toolchains"]["ffmpeg"]["gpl"]["parts"]
+        if ffmpeg_options(kit) not in gpl_parts:
+            die(f"there is no GPL FFmpeg for the {ffmpeg_options(kit)} target "
+                "(toolchains.ffmpeg.gpl.parts)")
+
     if args.check_only:
         # check-inputs of build.yml: the module order and the fit check only,
         # without the network lookups of the dependencies.
@@ -945,7 +983,7 @@ def cmd_plan(args) -> None:
 
     tools = cfg["toolchains"]
     deps: dict = {"kit": args.kit, "qt_version": cfg["qt_version"]}
-    deps["ffmpeg"] = ffmpeg_recipe(cfg, kit)
+    deps["ffmpeg"] = ffmpeg_recipe(cfg, kit, args.ffmpeg_license)
     if kit["toolchain"] == "android":
         deps["ndk"] = tools["android_ndk"]
         repo = tools["android_openssl"]["repo"]
@@ -996,7 +1034,9 @@ def cmd_plan(args) -> None:
     set_output("publish_state", "true" if is_host else "false")
     # The kit name keeps the caches of kits with the same recipe apart: the
     # cache of one kit is never restored on the runner of another.
-    set_output("ffmpeg_key", f"ffmpeg-{args.kit}-{ffmpeg_recipe_key(deps['ffmpeg'])}")
+    # A GPL FFmpeg has a key of its own, so that no cache restores it for a kit.
+    prefix = "ffmpeg-gpl" if args.ffmpeg_license == "gpl" else "ffmpeg"
+    set_output("ffmpeg_key", f"{prefix}-{args.kit}-{ffmpeg_recipe_key(deps['ffmpeg'])}")
     total = sum(estimate_minutes(cfg, kit, i["kind"], i["module"]) for i in items)
     where = " (webengine job: " + " ".join(m for m in order if m in offloaded) + ")" \
         if offloaded else ""
@@ -1069,16 +1109,24 @@ def extract_archive(archive: Path, dest: Path, strip_top: bool,
 
 
 FFMPEG_LICENSE = "LGPL version 2.1 or later"
+# The license that FFmpeg's configure script reports for each recipe license.
+FFMPEG_LICENSES = {"lgpl": FFMPEG_LICENSE, "gpl": "GPL version 3 or later"}
 FFMPEG_CONFIG = Path("licenses") / "ffmpeg-config.txt"
 FFMPEG_SOURCE = Path("licenses") / "FFMPEG-SOURCE.txt"
 FFMPEG_STAMP = ".qtci-recipe.json"
 
 
-def check_ffmpeg_license(ffmpeg_dir: Path) -> None:
-    """Fail unless the FFmpeg in ffmpeg_dir reports the LGPL license.
+def recipe_license(recipe: dict) -> str:
+    """The license that the FFmpeg of a recipe must report."""
+    return FFMPEG_LICENSES[recipe.get("license", "lgpl")]
+
+
+def check_ffmpeg_license(ffmpeg_dir: Path, expected: str = FFMPEG_LICENSE) -> None:
+    """Fail unless the FFmpeg in ffmpeg_dir reports the expected license.
 
     build-ffmpeg.sh copies the license that FFmpeg's configure script
-    computed. An option that pulls in GPL or nonfree code changes it.
+    computed. An option that pulls in GPL or nonfree code changes it. Only
+    the Build FFmpeg workflow expects the GPL; Qt kits always expect the LGPL.
     """
     path = ffmpeg_dir / FFMPEG_CONFIG
     try:
@@ -1087,9 +1135,11 @@ def check_ffmpeg_license(ffmpeg_dir: Path) -> None:
         die(f"{path} not found; tools/build-ffmpeg.sh did not make the FFmpeg in {ffmpeg_dir}")
     m = re.search(r'^#define FFMPEG_LICENSE "([^"]*)"', text, re.MULTILINE)
     found = m[1] if m else "no license line"
-    if found != FFMPEG_LICENSE:
-        die(f"the FFmpeg in {ffmpeg_dir} is not {FFMPEG_LICENSE} ({found}); "
-            "Qt packages must not contain GPL or nonfree FFmpeg code")
+    if found != expected:
+        if expected == FFMPEG_LICENSE:
+            die(f"the FFmpeg in {ffmpeg_dir} is not {FFMPEG_LICENSE} ({found}); "
+                "Qt packages must not contain GPL or nonfree FFmpeg code")
+        die(f"the FFmpeg in {ffmpeg_dir} is not {expected} ({found})")
 
 
 FFMPEG_CHECKS = "FFMPEG-CHECKS.txt"
@@ -1101,20 +1151,73 @@ FFMPEG_MANIFEST = ".qtci-files.json"
 # Each part of the FFmpeg build: its recipe key, its title, and the variable
 # that passes its source directory to build-ffmpeg.sh.
 FFMPEG_SOURCE_PARTS = (
-    ("ffmpeg", "FFmpeg (LGPL-2.1-or-later), shared libraries and programs", "FF_SRC"),
+    ("ffmpeg", "FFmpeg, shared libraries and programs", "FF_SRC"),
     ("dav1d", "dav1d (BSD-2-Clause), linked statically into libavcodec", "DAV1D_SRC"),
     ("nv_codec_headers", "nv-codec-headers (MIT), headers only", "NVCODEC_SRC"),
     ("libvpl", "libvpl (MIT), linked statically", "LIBVPL_SRC"),
     ("amf_headers", "AMF headers (MIT), headers only", "AMF_SRC"),
     ("zlib", "zlib (Zlib), linked statically", "ZLIB_SRC"),
     ("libaribcaption", "libaribcaption (MIT), linked statically", "ARIBCAPTION_SRC"),
+    # The parts of the GPL FFmpeg (toolchains.ffmpeg.gpl), all linked statically.
+    ("x264", "x264 (GPL-2.0-or-later), linked statically", "X264_SRC"),
+    ("x265", "x265 (GPL-2.0-or-later), linked statically", "X265_SRC"),
+    ("libvpx", "libvpx (BSD-3-Clause), linked statically", "LIBVPX_SRC"),
+    ("libaom", "libaom (BSD-2-Clause), linked statically", "LIBAOM_SRC"),
+    ("svtav1", "SVT-AV1 (BSD-3-Clause-Clear), linked statically", "SVTAV1_SRC"),
+    ("libwebp", "libwebp (BSD-3-Clause), linked statically", "LIBWEBP_SRC"),
+    ("openjpeg", "OpenJPEG (BSD-2-Clause), linked statically", "OPENJPEG_SRC"),
+    ("xvid", "Xvid (GPL-2.0-or-later), linked statically", "XVID_SRC"),
+    ("libogg", "libogg (BSD-3-Clause), linked statically", "LIBOGG_SRC"),
+    ("libvorbis", "libvorbis (BSD-3-Clause), linked statically", "LIBVORBIS_SRC"),
+    ("libtheora", "libtheora (BSD-3-Clause), linked statically", "LIBTHEORA_SRC"),
+    ("lame", "LAME (LGPL-2.0-or-later), linked statically", "LAME_SRC"),
+    ("opus", "Opus (BSD-3-Clause), linked statically", "OPUS_SRC"),
+    ("soxr", "SoX Resampler (LGPL-2.1-or-later), linked statically", "SOXR_SRC"),
+    ("zimg", "zimg (WTFPL), linked statically", "ZIMG_SRC"),
+    ("vidstab", "vid.stab (GPL-2.0-or-later), linked statically", "VIDSTAB_SRC"),
+    ("freetype", "FreeType (FTL OR GPL-2.0-or-later), linked statically", "FREETYPE_SRC"),
+    ("fribidi", "GNU FriBidi (LGPL-2.1-or-later), linked statically", "FRIBIDI_SRC"),
+    ("harfbuzz", "HarfBuzz (MIT), linked statically", "HARFBUZZ_SRC"),
+    ("libass", "libass (ISC), linked statically", "LIBASS_SRC"),
+    ("mbedtls", "Mbed TLS (Apache-2.0 OR GPL-2.0-or-later), linked statically", "MBEDTLS_SRC"),
+    ("srt", "SRT (MPL-2.0), linked statically", "SRT_SRC"),
 )
 
 
 def ffmpeg_source_text(recipe: dict) -> str:
-    lines = [
-        f"The FFmpeg libraries in this package are licensed under the {FFMPEG_LICENSE}.",
-        "You can replace them with your own build of the same FFmpeg version.",
+    license = recipe_license(recipe)
+    if recipe.get("license") == "gpl":
+        what = "libraries" if recipe["target"] == "android" else "libraries and programs"
+        intro = [
+            f"The FFmpeg {what} in this package are licensed under the",
+            f"{license} (GNU General Public License). The whole package is",
+            "under that license: give it to others only with its complete source, or with",
+            "access to that source from the same place at no extra charge (GPL v3,",
+            "section 6). That source is the file next to this package whose name ends",
+            "with -source.tar, in the same GitHub release or workflow artifact. This file",
+            "is also inside it.",
+        ]
+        if recipe["target"] == "mingw":
+            intro += [
+                "The runtime libraries of MinGW that the libraries and programs contain (the",
+                "MinGW-w64 runtime, winpthreads, and the GCC runtime) are not in it: they are",
+                "System Libraries of the compiler (GPL v3, section 1). licenses/ has their",
+                "license texts.",
+            ]
+        elif recipe["target"] == "android":
+            intro += [
+                "The runtime libraries of the Android NDK that the libraries contain (libc++,",
+                "libc++abi, libunwind, and the compiler-rt builtins; Apache-2.0 WITH",
+                "LLVM-exception, and the older UIUC license) are not in it: they are System",
+                "Libraries of the compiler (GPL v3, section 1).",
+                "licenses/android-ndk-NOTICE.toolchain has their license texts.",
+            ]
+    else:
+        intro = [
+            f"The FFmpeg libraries in this package are licensed under the {license}.",
+            "You can replace them with your own build of the same FFmpeg version.",
+        ]
+    lines = intro + [
         "",
         "vivace-qt-build built them with tools/build-ffmpeg.sh from these sources:",
         "",
@@ -1122,12 +1225,20 @@ def ffmpeg_source_text(recipe: dict) -> str:
     for key, title, _var in FFMPEG_SOURCE_PARTS:
         if key in recipe:
             info = recipe[key]
+            if key == "ffmpeg":
+                spdx = "GPL-3.0-or-later" if recipe.get("license") == "gpl" else "LGPL-2.1-or-later"
+                what = "shared libraries" if recipe["target"] == "android" else \
+                    "shared libraries and programs"
+                title = f"FFmpeg ({spdx}), {what}"
             lines += [f"{title} {info['version']}", f"  {info['url']}",
                       f"  SHA-256 {info['sha256']}", ""]
+    if recipe.get("license") != "gpl":
+        lines += [
+            "A GitHub release of this package also has these source archives, in the",
+            "file next to the package whose name ends with -source.tar.",
+            "",
+        ]
     lines += [
-        "A GitHub release of this package also has these source archives, in the",
-        "file next to the package whose name ends with -source.tar.",
-        "",
         f"Target: {recipe['target']}",
         "FFmpeg configure options (ffmpeg-config.txt has the full configure line):",
     ]
@@ -1295,6 +1406,10 @@ def cmd_setup_deps(args) -> None:
     root.mkdir(parents=True, exist_ok=True)
 
     if "ffmpeg" in deps:
+        # A kit contains only the LGPL FFmpeg; a GPL plan is for the Build
+        # FFmpeg workflow. setup_ffmpeg also checks the FFmpeg itself.
+        if deps["ffmpeg"].get("license", "lgpl") != "lgpl":
+            die("this plan has a GPL FFmpeg recipe; a Qt kit must contain the LGPL FFmpeg")
         setup_ffmpeg(args.ffmpeg_dir)
     if kit["toolchain"] == "android":
         setup_android(deps, kit, root)
@@ -1388,6 +1503,12 @@ def copy_ffmpeg_licenses(recipe: dict, sources: dict, out: Path) -> None:
             (lic / f"{name}-LICENSE.txt").write_text(leading_comment(src), encoding="utf-8")
         else:
             shutil.copy2(src, lic / f"{name}-{src.name}")
+        # More files that the package must contain, for example a patent grant.
+        for rel in recipe[key].get("extra_licenses", []):
+            extra = sources[key] / rel
+            if not extra.is_file():
+                die(f"{extra} not found; it must ship with FFmpeg")
+            shutil.copy2(extra, lic / f"{name}-{extra.name}")
         for rel in recipe[key].get("notices", []):
             notice = sources[key] / rel
             if not notice.is_file():
@@ -1414,13 +1535,21 @@ def copy_ffmpeg_licenses(recipe: dict, sources: dict, out: Path) -> None:
                              for comment, files in by_text.items())
             (lic / f"{key.replace('_', '-')}-NOTICES.txt").write_text(text, encoding="utf-8")
     # The MinGW FFmpeg links static libraries of MinGW (the MinGW-w64
-    # runtime, winpthreads, zlib, the GCC runtime); some need their notice
-    # in binaries.
+    # runtime, winpthreads, the GCC runtime, and zlib in the LGPL FFmpeg);
+    # some need their notice in binaries.
     for rel in recipe.get("mingw_licenses", []):
         src = Path(os.environ["QTCI_MINGW_DIR"]) / "licenses" / rel
         if not src.is_file():
             die(f"{src} not found; the MinGW FFmpeg must ship this license text")
         shutil.copy2(src, lic / f"mingw-{rel.replace('/', '-')}")
+    # The Android NDK links its compiler runtime (compiler-rt builtins,
+    # libunwind) into every library, and the C++ parts of the GPL FFmpeg add
+    # libc++ and libc++abi. NOTICE.toolchain of the NDK has their licenses.
+    if recipe["target"] == "android":
+        src = ensure_ndk(android_sdk(), recipe["ndk"]) / "NOTICE.toolchain"
+        if not src.is_file():
+            die(f"{src} not found; the Android FFmpeg must ship this license text")
+        shutil.copy2(src, lic / "android-ndk-NOTICE.toolchain")
 
 
 # License terms that ask for their notice in binary copies (BSD, MIT, ISC).
@@ -1541,15 +1670,47 @@ def listed_names(output: str) -> set[str]:
     return names
 
 
+def listed_filters(output: str) -> set[str]:
+    """Names in the list of "ffmpeg -filters".
+
+    Each line is " <flags> <name> <inputs>-><outputs> <text>", where the
+    flags are three characters such as "T.C" or "...".
+    """
+    names: set[str] = set()
+    for line in output.splitlines():
+        m = re.match(r"\s*[T.][S.][C.]\s+(\S+)\s+\S+->\S+", line)
+        if m:
+            names.add(m[1])
+    return names
+
+
+def listed_protocols(output: str) -> set[str]:
+    """Names in the list of "ffmpeg -protocols": one name on each indented line."""
+    names: set[str] = set()
+    for line in output.splitlines():
+        if line.startswith(" ") and len(line.split()) == 1:
+            names.add(line.strip())
+    return names
+
+
 def check_ffmpeg_programs(recipe: dict, out: Path, ff_run=None) -> None:
     """Run the checks of the recipe on the ffmpeg program; write FFMPEG-CHECKS.txt.
 
-    1. -version shows no --enable-gpl or --enable-nonfree; -L names the LGPL.
-    2. -encoders, -decoders, -demuxers, and -muxers list what the recipe needs.
+    1. LGPL: -version shows no --enable-gpl or --enable-nonfree, and -L names
+       the LGPL. GPL: -version shows --enable-gpl and --enable-version3 but no
+       --enable-nonfree, and -L names the GPL version 3.
+    2. -encoders, -decoders, -demuxers, -muxers, -filters, and -protocols list
+       what the recipe needs.
     3. Windows: dumpbin /dependents shows no GPL encoder and no MinGW runtime DLL.
     """
     checks = recipe.get("checks")
     if not checks:
+        # Android has no programs (--disable-programs), so only the license
+        # gate ran. package-ffmpeg still needs the report of the checks.
+        (out / FFMPEG_CHECKS).write_text(
+            f"FFmpeg checks for {recipe['target']}: PASSED\n\n"
+            "This FFmpeg has no programs, so only the license gate ran: "
+            f"config.h reports \"{recipe_license(recipe)}\".\n", encoding="utf-8")
         return
     ffmpeg = out / "bin" / ("ffmpeg.exe" if IS_WINDOWS else "ffmpeg")
     if not ffmpeg.is_file():
@@ -1567,15 +1728,27 @@ def check_ffmpeg_programs(recipe: dict, out: Path, ff_run=None) -> None:
         return result.stdout
 
     version = ff("-version")
-    for option in ("--enable-gpl", "--enable-nonfree"):
-        if option in version:
-            errors.append(f"ffmpeg -version shows {option}")
+    gpl = recipe.get("license") == "gpl"
+    if "--enable-nonfree" in version:
+        errors.append("ffmpeg -version shows --enable-nonfree")
+    for option in ("--enable-gpl", "--enable-version3"):
+        if gpl and option not in version:
+            errors.append(f"ffmpeg -version does not show {option}")
+    if not gpl and "--enable-gpl" in version:
+        errors.append("ffmpeg -version shows --enable-gpl")
     license_text = ff("-L")
-    if not re.search(r"GNU Lesser General Public\s+License", license_text) or \
+    if gpl:
+        if not re.search(r"GNU General Public License as published by\s+the Free Software"
+                         r"\s+Foundation; either version 3", license_text):
+            errors.append("ffmpeg -L does not name the GNU General Public License version 3")
+    elif not re.search(r"GNU Lesser General Public\s+License", license_text) or \
             "GNU General Public License as published" in license_text:
         errors.append("ffmpeg -L does not name the GNU Lesser General Public License")
-    for kind in ("encoders", "decoders", "demuxers", "muxers"):
-        found = listed_names(ff(f"-{kind}"))
+    parsers = {"filters": listed_filters, "protocols": listed_protocols}
+    for kind in ("encoders", "decoders", "demuxers", "muxers", "filters", "protocols"):
+        if kind not in checks and kind in parsers:
+            continue  # only GPL recipes check these; keep the LGPL report as it was
+        found = parsers.get(kind, listed_names)(ff(f"-{kind}"))
         missing = [name for name in checks.get(kind, []) if name not in found]
         if missing:
             errors.append(f"ffmpeg -{kind} does not list: {', '.join(missing)}")
@@ -1651,7 +1824,7 @@ def cmd_build_ffmpeg(args) -> None:
     # A restored cache has the stamp of the recipe it was built from and the
     # manifest of its files. It must still pass the license gate and the checks.
     if ffmpeg_complete(out, stamp):
-        check_ffmpeg_license(out)
+        check_ffmpeg_license(out, recipe_license(recipe))
         check_ffmpeg_programs(recipe, out)
         log(f"The FFmpeg in {out} matches the recipe; it is not built again")
         return
@@ -1707,6 +1880,8 @@ def cmd_build_ffmpeg(args) -> None:
         "FF_WORK": path(work / "build"),
         "FF_OUT": path(out),
         "FF_CONFIGURE": "\n".join(recipe["configure"]),
+        # The license gate of build-ffmpeg.sh compares config.h with this.
+        "FF_LICENSE": recipe_license(recipe),
         "FF_JOBS": str(os.cpu_count() or 4),
         "TOOLS_BIN": path(bindir),
     })
@@ -1735,14 +1910,14 @@ def cmd_build_ffmpeg(args) -> None:
         cmd = ["bash", script]
     run(cmd, env=env)
 
-    check_ffmpeg_license(out)
+    check_ffmpeg_license(out, recipe_license(recipe))
     copy_ffmpeg_licenses(recipe, sources, out)
     count = write_ffmpeg_notices(work / "build" / "ffmpeg-build", sources["ffmpeg"], out)
     log(f"{count} compiled FFmpeg files carry notices; {out / FFMPEG_NOTICES} has them")
     (out / FFMPEG_SOURCE).write_text(ffmpeg_source_text(recipe), encoding="utf-8")
     check_ffmpeg_programs(recipe, out)
     write_ffmpeg_stamp(out, stamp)
-    log(f"FFmpeg {recipe['ffmpeg']['version']} ({FFMPEG_LICENSE}) is in {out}")
+    log(f"FFmpeg {recipe['ffmpeg']['version']} ({recipe_license(recipe)}) is in {out}")
 
 
 def cmd_ffmpeg_status(args) -> None:
@@ -1770,12 +1945,16 @@ def cmd_package_ffmpeg(args) -> None:
     state = load_state(Path(args.state))
     cfg = load_version(state["qt_version"])
     recipe = state["deps"]["ffmpeg"]
-    platform = cfg["toolchains"]["ffmpeg"]["release"].get(state["kit"]) or \
-        die(f"kit {state['kit']} has no FFmpeg release (toolchains.ffmpeg.release)")
+    license = recipe.get("license", "lgpl")
+    tools = cfg["toolchains"]["ffmpeg"]
+    release, where = ((tools["gpl"]["release"], "toolchains.ffmpeg.gpl.release")
+                      if license == "gpl" else (tools["release"], "toolchains.ffmpeg.release"))
+    platform = release.get(state["kit"]) or \
+        die(f"kit {state['kit']} has no {license.upper()} FFmpeg release ({where})")
     src = Path(args.dir).resolve()
     if not ffmpeg_complete(src, json.dumps(recipe, sort_keys=True)):
         die(f"{src} is not the complete FFmpeg of this plan; run build-ffmpeg first")
-    check_ffmpeg_license(src)
+    check_ffmpeg_license(src, recipe_license(recipe))
     if not (src / FFMPEG_CHECKS).is_file():
         die(f"{src / FFMPEG_CHECKS} not found; run build-ffmpeg first")
     if not (src / FFMPEG_CHECKS).read_text(encoding="utf-8").startswith(
@@ -1784,7 +1963,7 @@ def cmd_package_ffmpeg(args) -> None:
 
     out_dir = Path(args.out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    name = f"ffmpeg-{recipe['ffmpeg']['version']}-lgpl-{platform}"
+    name = f"ffmpeg-{recipe['ffmpeg']['version']}-{license}-{platform}"
     archive = out_dir / (name + (".zip" if platform.startswith("win") else ".tar.xz"))
     archive.unlink(missing_ok=True)
     entries = sorted(p for p in src.rglob("*")
@@ -2967,6 +3146,9 @@ def main() -> None:
     p.add_argument("--state", help="directory for state.json (required without --check-only)")
     p.add_argument("--check-only", action="store_true",
                    help="check the inputs and the fit only; no network access, no state")
+    p.add_argument("--ffmpeg-license", choices=sorted(FFMPEG_LICENSES), default="lgpl",
+                   help="the FFmpeg of the plan; gpl is only for the Build FFmpeg workflow, "
+                        "and setup-deps (the stage jobs) refuses it")
     p.set_defaults(func=cmd_plan)
 
     p = sub.add_parser("setup-deps")

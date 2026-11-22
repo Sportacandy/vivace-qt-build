@@ -8,7 +8,8 @@ kit as an archive.
 The first supported Qt version is 6.12.0.
 
 This repository also builds and releases an LGPL FFmpeg 7.1 for Windows,
-Linux, and macOS. Read [FFmpeg distribution](#ffmpeg-distribution).
+Linux, and macOS, and a separate [GPL FFmpeg](#gpl-ffmpeg). Read
+[FFmpeg distribution](#ffmpeg-distribution).
 
 ## License overview
 
@@ -20,7 +21,8 @@ Linux, and macOS. Read [FFmpeg distribution](#ffmpeg-distribution).
 | SoundTouch, which the WSOLA patch adds to Qt Multimedia | LGPL-2.1-or-later | [patches/LICENSE](patches/LICENSE), and the SoundTouch files |
 | Qt in the kit archives | Most modules: the LGPL v3, alone or with GPL options. Some modules: GPL-3.0-only (see below). Each Qt source file states its license. | The Qt source files |
 | The patches in the kit archives | Same as `patches/` | `vivace-patches/LICENSE` in the archive |
-| FFmpeg in the kit archives and in the FFmpeg archives | LGPL-2.1-or-later | `licenses/ffmpeg/` in a kit archive, `licenses/` in an FFmpeg archive |
+| FFmpeg in the kit archives and in the LGPL FFmpeg archives | LGPL-2.1-or-later | `licenses/ffmpeg/` in a kit archive, `licenses/` in an FFmpeg archive |
+| The GPL FFmpeg archives (`ffmpeg-<version>-gpl-...`), with their parts | GPL-3.0-or-later; parts under the licenses of [GPL FFmpeg](#gpl-ffmpeg) | `licenses/` in the archive |
 | Parts inside FFmpeg: dav1d | BSD-2-Clause | Same directory as FFmpeg |
 | FFmpeg files with own terms, for example `speexdec.c`, `x86inc.asm` | BSD, MIT, or ISC | `ffmpeg-THIRD-PARTY-NOTICES.txt`, same directory as FFmpeg |
 | Part inside the MSVC FFmpeg: zlib | Zlib | Same directory as FFmpeg |
@@ -35,12 +37,14 @@ Linux, and macOS. Read [FFmpeg distribution](#ffmpeg-distribution).
 | Parts inside FFmpeg: libvpl, libaribcaption, nv-codec-headers, AMF headers | MIT | Same directory as FFmpeg |
 | MinGW parts: the MinGW-w64 runtime | Public domain, ZPL-2.1, BSD-style, and other permissive terms | `licenses/mingw/`, and the FFmpeg directory |
 | MinGW parts: winpthreads | MIT and BSD | `licenses/mingw/`, and the FFmpeg directory |
-| MinGW parts: zlib (FFmpeg only) | Zlib | The FFmpeg directory |
+| MinGW parts: zlib (LGPL MinGW FFmpeg only) | Zlib | The FFmpeg directory |
 | OpenSSL 3, linked statically into the OpenSSL TLS plugin of the Android kits | Apache-2.0 | `licenses/openssl/` in the Android kit archives |
 | MinGW parts: the GCC runtime (`libgcc`, `libstdc++`) | GPL-3.0-or-later WITH GCC-exception-3.1 | `licenses/mingw/`, and the FFmpeg directory |
+| The Android NDK runtime in the Android FFmpeg: compiler-rt builtins and libunwind, and in the GPL FFmpeg also libc++ and libc++abi | Apache-2.0 WITH LLVM-exception, and the older UIUC license | `android-ndk-NOTICE.toolchain`, same directory as FFmpeg |
 
 The MinGW parts are inside the MinGW FFmpeg and inside the Qt libraries of
-the `mingw1310_64` kit, because both link them statically.
+the `mingw1310_64` kit, because both link them statically. The GPL MinGW
+FFmpeg links its own zlib part instead of the zlib of MinGW.
 
 Not everything in the kit archives is under the LGPL. Under open-source
 terms, the libraries of these Qt repositories are GPL-3.0-only. Their
@@ -76,15 +80,20 @@ GPL-only repository,
 add it to `skip_modules`. Before you use another Qt module, check the
 license line in its headers.
 
-The FFmpeg in the kit archives and in the FFmpeg archives is under the LGPL
-v2.1 or later. Its parts are under licenses that allow this use. The GCC
+The FFmpeg in the kit archives and in the LGPL FFmpeg archives is under the
+LGPL v2.1 or later. Its parts are under licenses that allow this use. The
+[GPL FFmpeg](#gpl-ffmpeg) archives are under the GPL v3 or later. The GCC
 runtime exception lets the MinGW FFmpeg and the MinGW Qt libraries contain the
 GCC runtime without the GPL.
 
 
 The GPL of the scripts does not apply to the archives that the scripts
-build. The build stops if FFmpeg reports a license other than "LGPL version
-2.1 or later". The section [License](#license) has the details.
+build. The build of a kit, and of the LGPL FFmpeg archives, stops if FFmpeg
+reports a license other than "LGPL version 2.1 or later". The
+[GPL FFmpeg](#gpl-ffmpeg) archives do not go through this LGPL gate: they
+are under the GPL v3 or later, their build stops unless FFmpeg reports "GPL
+version 3 or later", and no kit contains them. The section [License](#license) has
+the details.
 
 ## Terminology
 
@@ -134,8 +143,10 @@ dependency versions.
 
 Qt Multimedia plays media with FFmpeg, and each kit archive contains the
 FFmpeg libraries. This repository also releases the same FFmpeg on its own,
-for applications that link FFmpeg directly. The libraries must be under the
-LGPL, so the build makes its own FFmpeg from source. It does not use a
+for applications that link FFmpeg directly, and a separate
+[GPL FFmpeg](#gpl-ffmpeg). The libraries of the kits must
+be under the LGPL, so the build makes its own FFmpeg from source. It does
+not use a
 prebuilt FFmpeg. Most prebuilt FFmpeg packages, for example the BtbN
 `gpl-shared` builds and the Homebrew `ffmpeg` formula, contain GPL code.
 
@@ -147,10 +158,10 @@ kit:
 | `msvc2022_64` | MSVC in MSYS2, on the Windows runner of the kit | `ffmpeg-7.1.5-lgpl-win64-msvc.zip` |
 | `mingw1310_64` | MinGW 13.1 in MSYS2, on the Windows runner of the kit | `ffmpeg-7.1.5-lgpl-win64-mingw.zip` |
 | `gcc_64` | GCC, on the Linux runner of the kit | `ffmpeg-7.1.5-lgpl-linux-x64.tar.xz` |
-| `gcc_arm64` | GCC, in the `debian:bookworm` container of the kit | Not released. The kit archive and the release have its source. |
-| `gcc_arm64_ubuntu` | GCC, on the Linux arm64 runner of the kit | Not released. The kit archive and the release have its source. |
+| `gcc_arm64` | GCC, in the `debian:bookworm` container of the kit | Not released as LGPL. The kit archive and the release have its source. The [GPL FFmpeg](#gpl-ffmpeg) release has a GPL build for this kit. |
+| `gcc_arm64_ubuntu` | GCC, on the Linux arm64 runner of the kit | Not released as LGPL. The kit archive and the release have its source. The [GPL FFmpeg](#gpl-ffmpeg) release has a GPL build for this kit. |
 | `macos` | Clang, on the macOS runner of the kit (arm64 only) | `ffmpeg-7.1.5-lgpl-macos-arm64.tar.xz` |
-| `android_arm64_v8a`, `android_x86_64` | The Android NDK, on `ubuntu-24.04` | Not released |
+| `android_arm64_v8a`, `android_x86_64` | The Android NDK, on `ubuntu-24.04` | Not released as LGPL. The [GPL FFmpeg](#gpl-ffmpeg) release has a GPL build for these kits. |
 
 ### Contents
 
@@ -235,13 +246,18 @@ macOS lists of hardware encoders show the encoders that the checks require.
 The FFmpeg of a platform can have more. `<name>-checks.txt` of each FFmpeg
 release has the complete output of `ffmpeg -encoders` for that platform.
 
-There is no software encoder for H.264, HEVC, AV1, or VP9. FFmpeg has these
-encoders only through external libraries: libx264 and libx265 are GPL, and
-the build does not include libaom, SVT-AV1, or libvpx. To encode these
-formats, use a hardware encoder. On Windows, `h264_mf` and `hevc_mf` can
-also use the software encoders of Media Foundation, if Windows has them.
+The LGPL FFmpeg has no software encoder for H.264, HEVC, AV1, or VP9.
+FFmpeg has these encoders only through external libraries: libx264 and
+libx265 are GPL, and the LGPL build does not include libaom, SVT-AV1, or
+libvpx. To encode these formats, use a hardware encoder. On Windows,
+`h264_mf` and `hevc_mf` can also use the software encoders of Media
+Foundation, if Windows has them. The [GPL FFmpeg](#gpl-ffmpeg) has these
+software encoders, but no kit contains it.
 
 ### License gate and checks
+
+This section describes the LGPL FFmpeg of the kits. The
+[GPL FFmpeg](#gpl-ffmpeg) section lists how its gate and checks differ.
 
 The build stops unless FFmpeg reports the license "LGPL version 2.1 or
 later". The stage jobs do the same check before they use the FFmpeg. So an
@@ -282,35 +298,47 @@ has the output of all checks.
 ### Build FFmpeg workflow
 
 1. Open **Actions** > **Build FFmpeg** > **Run workflow**.
-2. In **kits**, type `all` or a comma-separated list without spaces, for
-   example `msvc2022_64,gcc_64`.
-3. Optional: in **release_tag**, type a tag name, for example
-   `ffmpeg-7.1.5-r1`. The workflow creates the GitHub release if it does not
-   exist.
-4. Select **Run workflow**.
+2. In **license**, select `lgpl` (the FFmpeg of the kits) or `gpl` (the
+   [GPL FFmpeg](#gpl-ffmpeg)).
+3. In **kits**, type `all` or a comma-separated list without spaces, for
+   example `mingw1310_64,gcc_64`. `all` means every kit in the release map of
+   the license.
+4. Optional: in **release_tag**, type a tag name, for example
+   `ffmpeg-7.1.5-lgpl-1` or `ffmpeg-7.1.5-gpl-1`. The workflow creates the
+   GitHub release if it does not exist. Use a separate release for each
+   license. The workflow uploads only to a release whose notes start with
+   "LGPL FFmpeg" (license `lgpl`) or "GPL FFmpeg" (license `gpl`), so it
+   refuses a **Build Qt** release or a release with other notes.
+5. Select **Run workflow**.
 
-Each kit uploads these files as the workflow artifact `ffmpeg-release-<kit>`,
-and to the release if you set **release_tag**:
+Each kit uploads these files as the workflow artifact
+`ffmpeg-release-<license>-<kit>`, and to the release if you set
+**release_tag**:
 
 - `<name>.zip` or `<name>.tar.xz`, and its `.sha256` file. The archive has
-  `bin/`, `include/`, `lib/`, `licenses/`, and `FFMPEG-CHECKS.txt`.
+  `bin/`, `include/`, `lib/`, `licenses/`, and `FFMPEG-CHECKS.txt`. An
+  Android archive has no `bin/` (no programs).
 - `<name>-checks.txt`: the output of the checks.
 - `<name>-source.tar`: the source archives of FFmpeg and its parts, and
   `FFMPEG-SOURCE.txt`.
 
-The workflow uses the runner variables of **Build Qt**. It shares the build
-and the cache with the `ffmpeg` job of **Build Qt**, so a later Qt build of
-the same kit uses the FFmpeg from the cache. GitHub caches are per branch: a
+The workflow uses the runner variables of **Build Qt**. With **license**
+`lgpl`, it shares the build and the cache with the `ffmpeg` job of **Build
+Qt**, so a later Qt build of the same kit uses the FFmpeg from the cache. The
+GPL FFmpeg has a cache of its own. GitHub caches are per branch: a
 run sees the caches of its own branch and of the default branch.
 
 ### FFmpeg distribution
 
-This repository distributes FFmpeg in these forms:
+This repository distributes FFmpeg in these forms. The license terms at the
+end of this section are for the LGPL FFmpeg: the kit archives and the
+`-lgpl-` FFmpeg archives. For the `-gpl-` archives, follow
+[GPL FFmpeg](#gpl-ffmpeg) instead.
 
 | Form | Where | Contents |
 |------|-------|----------|
 | Kit archive | **Build Qt** releases, `qt-<qt_version>-<kit>` artifacts | Libraries, and license files in `licenses/ffmpeg/` |
-| FFmpeg archive | **Build FFmpeg** releases, `ffmpeg-release-<kit>` artifacts | Libraries, `ffmpeg`, `ffprobe`, headers, import libraries, and license files in `licenses/` |
+| FFmpeg archive | **Build FFmpeg** releases, `ffmpeg-release-<license>-<kit>` artifacts | Libraries, `ffmpeg` and `ffprobe` (not in the Android archives), headers, import libraries (Windows), pkg-config files, `FFMPEG-CHECKS.txt`, and license files in `licenses/` |
 | Intermediate artifacts of a **Build Qt** run | `ffmpeg-<kit>`, `state-<kit>-...`, `host-qt-<qt_version>-<kit>` (7 days) | The FFmpeg directory, or a prefix that contains FFmpeg. Each saved prefix also has `BUILDINFO-vivace.txt`, `vivace-patches/`, and `vivace-build/`. |
 
 Each form comes with a source archive from the same place: `<kit archive
@@ -328,11 +356,14 @@ with their URLs, their SHA-256 checksums, and the configure options. It also
 contains the scripts that control the build in `vivace-qt-build/`
 (`tools/build-ffmpeg.sh`, `tools/qtci.py`, the composite action, and their
 GPL license), `recipe.json` with every input of the build and the SHA-256
-values of the scripts, and `BUILD-INFO.txt`. The workflow files
-(`ffmpeg.yml`, `kit.yml`) only start these scripts, and the archive does not
-contain them. `BUILD-INFO.txt` names the commit of this repository that has
-them. Before a **Build Qt** package job uses this archive, it checks the
-source archives, the scripts, and the text files against the recipe. A **Build Qt** run also
+values of the scripts, and `BUILD-INFO.txt`. The archive also contains
+`ffmpeg.yml`, the workflow of **Build FFmpeg**, which selects the license,
+the runner, and the container of its builds. In a **Build Qt** run, the
+`ffmpeg` job of `kit.yml` selects the runner and the container instead. The
+archive does not contain `kit.yml`; `BUILD-INFO.txt` names the commit of
+this public repository that has it. Before a **Build Qt** package job uses
+this archive, it checks the source archives and the scripts against the
+recipe, and checks that the text files are there. A **Build Qt** run also
 uploads this archive as the artifact `ffmpeg-source-<kit>`, next to the
 `ffmpeg-<kit>` artifact that the stage jobs use.
 
@@ -343,13 +374,14 @@ Chromium, compiled into Qt WebEngine Core. That FFmpeg is LGPL too, but it
 is not a separate library, and the checks of this section do not cover it.
 Its source is in the Qt WebEngine repository at the commit that
 `BUILDINFO-vivace.txt` names. The build
-links the parts statically into the FFmpeg libraries. The parts are under the
-BSD-2-Clause, ISC, MIT, or Zlib license. The MinGW FFmpeg also contains the
+links the parts statically into the FFmpeg libraries. The parts of the LGPL
+FFmpeg are under the BSD-2-Clause, ISC, MIT, or Zlib license. The MinGW
+FFmpeg also contains the
 MinGW-w64 runtime (public domain, ZPL-2.1, BSD-style, and other permissive
 terms in its license file), winpthreads (MIT and BSD),
 and the GCC runtime (GPL with the GCC runtime library exception).
 
-If you redistribute this FFmpeg, for example with an application:
+If you redistribute the LGPL FFmpeg, for example with an application:
 
 - Ship the license files of `licenses/` with it.
 - Offer the source code: ship the source archive, or say where your users
@@ -357,6 +389,123 @@ If you redistribute this FFmpeg, for example with an application:
 - Keep the FFmpeg libraries as separate shared libraries, so that your users
   can replace them.
 - Do not add GPL libraries to it, for example libx264 or libx265.
+
+### GPL FFmpeg
+
+The **Build FFmpeg** workflow can also build a GPL FFmpeg: set **license**
+to `gpl`. This FFmpeg has more encoders, filters, and protocols than the
+LGPL FFmpeg, for example libx264 and libx265. No kit contains it. The kits
+always contain the LGPL FFmpeg, and the stage jobs stop if an FFmpeg reports
+another license.
+
+The GPL FFmpeg is under the GPL v3 or later. FFmpeg needs
+`--enable-version3` to link OpenSSL 3 (Linux) into a GPL build, which makes
+the license GPL v3. Mbed TLS (which SRT uses for encryption) is under Apache-2.0 OR
+GPL-2.0-or-later, so it is compatible with the GPL v3 too.
+
+The recipe is `toolchains.ffmpeg.gpl` in `versions/<qt_version>.json`. It
+adds parts, configure options, and checks to the recipe of the LGPL FFmpeg
+of the same kit. So the GPL FFmpeg also has the hardware encoders, dav1d, and
+libaribcaption of that kit.
+
+| Kit | Released as |
+|-----|-------------|
+| `mingw1310_64` | `ffmpeg-7.1.5-gpl-win64-mingw.zip` |
+| `gcc_64` | `ffmpeg-7.1.5-gpl-linux-x64.tar.xz` |
+| `gcc_arm64` | `ffmpeg-7.1.5-gpl-linux-arm64.tar.xz` (Debian 12) |
+| `gcc_arm64_ubuntu` | `ffmpeg-7.1.5-gpl-linux-arm64-ubuntu.tar.xz` (Ubuntu 24.04) |
+| `macos` | `ffmpeg-7.1.5-gpl-macos-arm64.tar.xz` |
+| `android_arm64_v8a` | `ffmpeg-7.1.5-gpl-android-arm64.tar.xz` (no `ffmpeg` or `ffprobe`) |
+| `android_x86_64` | `ffmpeg-7.1.5-gpl-android-x86_64.tar.xz` (no `ffmpeg` or `ffprobe`) |
+
+There is no GPL FFmpeg for `msvc2022_64`. The script builds the parts with
+autotools, meson, and CMake, and Xvid, Theora, and zimg have only Visual
+Studio projects for MSVC. A program that you build with MSVC can load the
+DLLs of the MinGW FFmpeg, because the FFmpeg API is a C API.
+
+The parts of the GPL FFmpeg, linked statically into the FFmpeg libraries:
+
+| Part | License | What FFmpeg gets |
+|------|---------|------------------|
+| x264 | GPL-2.0-or-later | `libx264` encoder (H.264) |
+| x265, with 8-bit, 10-bit, and 12-bit encoding | GPL-2.0-or-later | `libx265` encoder (HEVC) |
+| libvpx | BSD-3-Clause | `libvpx` and `libvpx-vp9` encoders |
+| libaom | BSD-2-Clause | `libaom-av1` encoder |
+| SVT-AV1 | BSD-3-Clause-Clear | `libsvtav1` encoder |
+| libwebp | BSD-3-Clause | `libwebp` encoder |
+| OpenJPEG | BSD-2-Clause | `libopenjpeg` encoder (JPEG 2000) |
+| Xvid | GPL-2.0-or-later | `libxvid` encoder (MPEG-4 Part 2) |
+| libogg, libvorbis, libtheora | BSD-3-Clause | `libvorbis` and `libtheora` encoders |
+| LAME | LGPL-2.0-or-later | `libmp3lame` encoder (MP3) |
+| Opus | BSD-3-Clause | `libopus` encoder |
+| SoX Resampler | LGPL-2.1-or-later | `soxr` resampler of the `aresample` filter |
+| zimg | WTFPL | `zscale` filter |
+| vid.stab | GPL-2.0-or-later | `vidstabdetect` and `vidstabtransform` filters |
+| zlib (MinGW only) | Zlib | PNG, Matroska content compression, and more. The other targets use the zlib of the system. |
+| FreeType (not on Linux) | FTL OR GPL-2.0-or-later | `drawtext` filter, and libass |
+| GNU FriBidi, HarfBuzz | LGPL-2.1-or-later, MIT | `drawtext` filter, and libass |
+| libass | ISC | `ass` and `subtitles` filters |
+| SRT, with Mbed TLS | MPL-2.0, Apache-2.0 OR GPL-2.0-or-later | `srt` protocol |
+
+With `--enable-gpl`, FFmpeg also builds its own GPL code, for example the
+`pp` filter (libpostproc). The Linux GPL FFmpeg uses the FreeType of the
+system, because libaribcaption already links it. Its libass uses Fontconfig
+for fonts. libass uses DirectWrite on Windows and CoreText on macOS. On
+Android, libass has no system font provider: it uses the fonts in the
+subtitle file, the fonts attached to the media file (`subtitles` filter),
+and the fonts that the application adds, for example with the `fontsdir`
+option of the `subtitles` filter.
+
+The build stops unless FFmpeg reports the license "GPL version 3 or
+later". The checks of [License gate and checks](#license-gate-and-checks)
+change for a GPL FFmpeg:
+
+- `ffmpeg -hide_banner -version` must show `--enable-gpl` and
+  `--enable-version3`, and must not show `--enable-nonfree`.
+- `ffmpeg -hide_banner -L` must name the GNU General Public License version 3.
+- The Android FFmpeg has no programs, so only the license gate runs for it.
+- `-encoders`, `-filters`, and `-protocols` must also list the encoders,
+  filters, and protocol that `gpl.checks` in the recipe names, for example
+  `libx264`, `zscale`, and `srt`.
+
+The GPL FFmpeg has a cache key of its own (`ffmpeg-gpl-<kit>-...`), so no
+**Build Qt** run restores it. The workflow builds the Android FFmpeg on
+`ubuntu-24.04`, and the `gcc_arm64` FFmpeg in the `debian:bookworm`
+container, as **Build Qt** does.
+
+If you redistribute the GPL FFmpeg, for example with an application:
+
+- Ship the license files of `licenses/` with it.
+- Ship the source archive (`<archive name without .zip or
+  .tar.xz>-source.tar`, for example
+  `ffmpeg-7.1.5-gpl-win64-mingw-source.tar`) with it, or give access to it
+  from the same place as the binaries at no extra charge (GPL v3, section
+  6). A written offer of the source is an option only for a physical
+  product or medium (section 6(b)). You did not receive these binaries with
+  an offer, so section 6(c) does not apply.
+- The source archive has the source of FFmpeg and of every part. It does
+  not have the source of the System Libraries (GPL v3, section 1): the
+  runtime libraries of MinGW in the MinGW FFmpeg (the MinGW-w64 runtime,
+  winpthreads, and the GCC runtime, whose license texts are in
+  `licenses/`), the runtime libraries of the Android NDK in the Android
+  FFmpeg (libc++, libc++abi, libunwind, and the compiler-rt builtins, whose
+  license texts are in `licenses/android-ndk-NOTICE.toolchain`), and the
+  libraries of the operating system that the FFmpeg links dynamically, for
+  example OpenSSL and FreeType on Linux.
+- An application that links the GPL FFmpeg forms one combined work with
+  it. Give the whole work to others under the GPL v3 (your own code can be
+  under a license that is compatible with it), with its complete source,
+  including the source of your application, as the previous item says
+  for the source archive.
+- Except on Linux, the GPL FFmpeg contains FreeType, under the FreeType
+  License (`freetype-FTL.TXT`) or the GPL v2 or later
+  (`freetype-GPLv2.TXT`; `freetype-LICENSE.TXT` describes both choices). Under the FreeType License, the documentation
+  of your product must state that the software is based in part on the
+  work of the FreeType Team. The license suggests this text: "Portions of
+  this software are copyright © 2026 The FreeType Project
+  (https://freetype.org). All rights reserved." 2026 is the year in the
+  source headers of FreeType 2.15.0. The GPL v2 or later asks for no such
+  statement.
 
 ### FFmpeg in the kit archives
 
@@ -866,6 +1015,41 @@ Python or Chocolatey packages. To prepare such a runner, do these steps once:
 
 This section lists the limitations that the project accepts.
 
+GPL FFmpeg:
+
+- The recipe downloads x264, x265, LAME, and SoX Resampler from the Debian
+  package pool (`deb.debian.org/debian/pool`). Debian removes a source
+  archive from the pool when no Debian release has that version. A later
+  build of the same recipe then fails with HTTP 404. Then change the URL to
+  `https://snapshot.debian.org/archive/debian/<timestamp>/pool/main/...`,
+  which keeps every archive, with the same checksum.
+- The MinGW libass has no iconv: it cannot recode a subtitle file that is
+  not UTF-8. MinGW 13.1 has only a static GNU libiconv, and the package does
+  not carry its license and source.
+- Some parts build with less assembly code than they could, so their
+  encoding is slower there. On Android (`android_arm64_v8a` and
+  `android_x86_64`), x265 has no SIMD code at any bit depth. On arm64
+  Linux and macOS, the 10-bit and 12-bit x265 libraries have no Neon code,
+  although x265 4.1 has it for them, and no x265 library has SVE or SVE2
+  code. Xvid and Theora have no assembly code on Android and arm64. libass
+  has no assembly code on arm64 (Linux, macOS, and Android), although
+  libass 0.17.5 has AArch64 code.
+- The `.pc` files in a GPL FFmpeg archive name the static parts in
+  `Libs.private`, for example `-lx264`. The archive does not contain these
+  libraries, so a static link with the flags of `pkg-config --static`
+  fails. Builds against the
+  shared FFmpeg libraries work. The LGPL archives do the same with `-ldav1d`.
+- The Xvid build also links a shared library, which the script then
+  deletes. If that link fails on a target, the build stops, although FFmpeg
+  needs only the static library.
+- A version file without a `gpl` block stops a GPL plan with a Python
+  traceback, not with a clear message.
+- On Android, the static C++ runtime of the NDK (libc++) is in more than
+  one FFmpeg library: x265 in libavcodec, SRT in libavformat, and zimg in
+  libavfilter. The NDK advises one C++ runtime per application, because
+  each copy has its own state. These parts have C interfaces, and FFmpeg
+  passes no C++ objects or exceptions between its libraries.
+
 Build results:
 
 - The install check covers only the parts that `installs`, `installs_if`,
@@ -1184,12 +1368,12 @@ The **Checks** workflow runs the same check on every push.
 | `.github/workflows/build.yml` | The **Build Qt** workflow. It selects kits and runners. |
 | `.github/workflows/kit.yml` | The jobs of one kit. Generated by `tools/gen-kit-workflow.py`. |
 | `.github/workflows/checks.yml` | Lint and patch checks for every push. |
-| `.github/workflows/ffmpeg.yml` | The **Build FFmpeg** workflow. It builds and releases the LGPL FFmpeg. |
+| `.github/workflows/ffmpeg.yml` | The **Build FFmpeg** workflow. It builds and releases the LGPL or the GPL FFmpeg. |
 | `.github/actions/stage/` | One stage: restore, build, save. |
 | `.github/actions/setup-kit/` | System packages and dependencies of a kit. |
 | `.github/actions/build-ffmpeg/` | The FFmpeg build of a kit, for `kit.yml` and `ffmpeg.yml`. |
 | `tools/qtci.py` | The build driver (plan, stage, package, and checks). |
-| `tools/build-ffmpeg.sh` | Builds the LGPL FFmpeg of one kit, with its parts. |
+| `tools/build-ffmpeg.sh` | Builds the LGPL or the GPL FFmpeg of one kit, with its parts. |
 | `versions/<qt_version>.json` | Modules, dependency pins, time estimates, and kit options. |
 | `patches/<qt_version>/<module>/` | Patches for one module. |
 
@@ -1235,8 +1419,9 @@ FFmpeg in the kit archives is under the LGPL v2.1 or later, with parts under
 the BSD-2-Clause, ISC, MIT, and Zlib licenses. Read
 [FFmpeg distribution](#ffmpeg-distribution).
 
-The FFmpeg archives of the **Build FFmpeg** workflow contain FFmpeg under
-the same licenses, with the license files in `licenses/`.
+The LGPL FFmpeg archives of the **Build FFmpeg** workflow contain FFmpeg
+under the same licenses, with the license files in `licenses/`. The GPL
+FFmpeg archives are under the GPL v3 or later. Read [GPL FFmpeg](#gpl-ffmpeg).
 
 Make all changes to Qt source code with patch files in `patches/`. Do not
 change Qt source code from a script in `tools/`. A script change to Qt

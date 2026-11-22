@@ -1,8 +1,8 @@
 name: Build the FFmpeg of a kit
 description: >
-  Builds the LGPL FFmpeg of one kit with tools/build-ffmpeg.sh, or restores it
-  from the cache, and runs its license gate and checks. kit.yml and ffmpeg.yml
-  use this action.
+  Builds the FFmpeg of one kit with tools/build-ffmpeg.sh, or restores it from
+  the cache, and runs its license gate and checks. kit.yml (the LGPL FFmpeg of
+  the kits) and ffmpeg.yml (the LGPL or the GPL FFmpeg) use this action.
 
 inputs:
   state-dir:
@@ -17,6 +17,9 @@ inputs:
   out:
     description: Install directory of FFmpeg.
     required: true
+  license:
+    description: lgpl or gpl, as in the plan. The GPL parts need autotools.
+    default: lgpl
 
 runs:
   using: composite
@@ -49,13 +52,14 @@ runs:
       with:
         msystem: MSYS
         update: false
-        install: make diffutils pkgconf
+        install: make diffutils pkgconf ${{ inputs.license == 'gpl' && 'autoconf automake libtool perl' || '' }}
 
     - name: Install build tools
       if: steps.status.outputs.complete != 'true'
       shell: bash
       env:
         TOOLCHAIN: ${{ inputs.toolchain }}
+        LICENSE: ${{ inputs.license }}
         RUNNER_KIND: ${{ runner.environment }}
         MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
       run: |
@@ -74,6 +78,11 @@ runs:
               # RUNPATH of the libraries.
               packages+=(g++ patchelf libva-dev libssl-dev libfreetype-dev libfontconfig-dev zlib1g-dev)
             fi
+            if [ "$LICENSE" = gpl ]; then
+              # zimg has no configure script in its source; Xvid and LAME get
+              # new config.guess files from automake. libaom needs Perl.
+              packages+=(autoconf automake libtool perl)
+            fi
             if [ "$hosted" = true ]; then
               sudo apt-get update -q
               sudo apt-get install -y -q --no-install-recommends --no-upgrade "${packages[@]}"
@@ -82,10 +91,25 @@ runs:
               dpkg -s "$p" > /dev/null 2>&1 || missing+=("$p")
             done ;;
           macOS)
-            if [ "$hosted" = true ] && ! command -v pkg-config > /dev/null; then
-              HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 brew install pkgconf
+            tools=(make pkg-config)
+            if [ "$LICENSE" = gpl ]; then tools+=(autoconf automake libtool); fi
+            if [ "$hosted" = true ]; then
+              # Homebrew names pkg-config pkgconf, and installs libtool as glibtool.
+              need=()
+              for tool in "${tools[@]}"; do
+                case "$tool" in
+                  pkg-config) command -v pkg-config > /dev/null || need+=(pkgconf) ;;
+                  libtool) command -v glibtool > /dev/null || need+=(libtool) ;;
+                  make) ;;
+                  *) command -v "$tool" > /dev/null || need+=("$tool") ;;
+                esac
+              done
+              if [ ${#need[@]} -gt 0 ]; then
+                HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 brew install "${need[@]}"
+              fi
             fi
-            for tool in make pkg-config; do
+            for tool in "${tools[@]}"; do
+              if [ "$tool" = libtool ]; then tool=glibtool; fi
               command -v "$tool" > /dev/null || missing+=("$tool")
             done ;;
           Windows)
@@ -103,8 +127,12 @@ runs:
               fi
             fi
             command -v nasm > /dev/null || missing+=(nasm)
-            for tool in make cmp pkg-config; do
-              [ -f "$(cygpath -u "$msys")/usr/bin/$tool.exe" ] || missing+=("$tool (MSYS2 in $msys)")
+            tools=(make cmp pkg-config)
+            if [ "$LICENSE" = gpl ]; then tools+=(autoconf automake libtool perl); fi
+            for tool in "${tools[@]}"; do
+              # autoconf, automake, and libtool are scripts without .exe.
+              u="$(cygpath -u "$msys")/usr/bin/$tool"
+              [ -f "$u.exe" ] || [ -f "$u" ] || missing+=("$tool (MSYS2 in $msys)")
             done ;;
         esac
         if [ ${#missing[@]} -gt 0 ]; then

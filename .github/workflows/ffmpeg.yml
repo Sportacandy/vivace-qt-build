@@ -1,13 +1,17 @@
-# Builds the LGPL FFmpeg of the selected kits, runs its checks, and uploads
-# the archives and their sources to a GitHub release.
+# Builds the LGPL or the GPL FFmpeg of the selected kits, runs its checks, and
+# uploads the archives and their sources to a GitHub release.
 #
-# The FFmpeg is the one that the kits of build.yml contain: the same recipe
-# (toolchains.ffmpeg in versions/<qt_version>.json), the same build
-# (.github/actions/build-ffmpeg), and the same cache key.
+# The LGPL FFmpeg is the one that the kits of build.yml contain: the same
+# recipe (toolchains.ffmpeg in versions/<qt_version>.json), the same build
+# (.github/actions/build-ffmpeg), and the same cache key. The GPL FFmpeg adds
+# the parts of toolchains.ffmpeg.gpl. No kit contains it, and its cache key is
+# its own.
 #
 # The runners come from the repository variables of build.yml:
 #   QTCI_RUNNER_<KIT>, QTCI_RUNNER_WINDOWS, QTCI_RUNNER_LINUX, QTCI_RUNNER_MACOS
 # A runner value can be a label ("windows-2022") or a JSON array of labels.
+# The Android FFmpeg is cross-compiled on ubuntu-24.04, as in kit.yml, and the
+# FFmpeg of a container kit (gcc_arm64) is built in its container image.
 
 name: Build FFmpeg
 
@@ -18,8 +22,15 @@ on:
         description: Qt version whose FFmpeg recipe to use (a file in versions/ must exist)
         default: "6.12.0"
         required: true
+      license:
+        description: 'lgpl: the FFmpeg of the kits. gpl: the GPL FFmpeg (GPL 3 or later, more encoders and filters).'
+        type: choice
+        options:
+          - lgpl
+          - gpl
+        default: lgpl
       kits:
-        description: 'Comma-separated kits without spaces, or "all": msvc2022_64,mingw1310_64,gcc_64,macos'
+        description: 'Comma-separated kits without spaces, or "all" (every kit in the release map of the license). lgpl: msvc2022_64,mingw1310_64,gcc_64,macos. gpl: mingw1310_64,gcc_64,gcc_arm64,gcc_arm64_ubuntu,macos,android_arm64_v8a,android_x86_64'
         default: all
         required: true
       release_tag:
@@ -54,12 +65,18 @@ jobs:
         id: select
         env:
           QT_VERSION: ${{ inputs.qt_version }}
+          LICENSE: ${{ inputs.license }}
           KITS: ${{ inputs.kits }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           RUNNER_MSVC2022_64: ${{ vars.QTCI_RUNNER_MSVC2022_64 || vars.QTCI_RUNNER_WINDOWS || 'windows-2022' }}
           RUNNER_MINGW1310_64: ${{ vars.QTCI_RUNNER_MINGW1310_64 || vars.QTCI_RUNNER_WINDOWS || 'windows-2022' }}
           RUNNER_GCC_64: ${{ vars.QTCI_RUNNER_GCC_64 || vars.QTCI_RUNNER_LINUX || 'ubuntu-24.04' }}
+          # The container of gcc_arm64 needs a GitHub-hosted runner, as in kit.yml.
+          RUNNER_GCC_ARM64: ${{ vars.QTCI_RUNNER_GCC_ARM64 || 'ubuntu-24.04-arm' }}
+          RUNNER_GCC_ARM64_UBUNTU: ${{ vars.QTCI_RUNNER_GCC_ARM64_UBUNTU || 'ubuntu-24.04-arm' }}
           RUNNER_MACOS: ${{ vars.QTCI_RUNNER_MACOS || 'macos-15' }}
+          RUNNER_ANDROID_ARM64_V8A: ubuntu-24.04
+          RUNNER_ANDROID_X86_64: ubuntu-24.04
         run: |
           python - <<'EOF'
           import json, os, re, sys
@@ -75,12 +92,17 @@ jobs:
           path = Path("versions") / f"{version}.json"
           if not path.is_file():
               fail(f"{path} does not exist")
-          release = json.loads(path.read_text(encoding="utf-8"))["toolchains"]["ffmpeg"]["release"]
+          cfg = json.loads(path.read_text(encoding="utf-8"))
+          ffmpeg = cfg["toolchains"]["ffmpeg"]
+          license = os.environ["LICENSE"]
+          if license not in ("lgpl", "gpl"):
+              fail(f"license must be lgpl or gpl, not {license!r}")
+          release = ffmpeg["gpl"]["release"] if license == "gpl" else ffmpeg["release"]
           kits = os.environ["KITS"].strip()
           selected = list(release) if kits == "all" else [k for k in kits.split(",") if k]
           unknown = [k for k in selected if k not in release]
           if unknown or not selected:
-              fail(f"kits must be 'all' or a list of {', '.join(release)}; got {kits!r}")
+              fail(f"kits must be 'all' or a list of {', '.join(release)} for {license}; got {kits!r}")
           tag = os.environ["RELEASE_TAG"]
           if tag and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", tag):
               fail("release_tag must start with a letter or digit and contain only "
@@ -93,7 +115,12 @@ jobs:
               value = value.strip()
               return value if value.startswith("[") else json.dumps(value)
 
-          matrix = {"include": [{"kit": k, "runs_on": labels(os.environ["RUNNER_" + k.upper()])}
+          # The Android FFmpeg is cross-compiled outside the container of a kit.
+          def container(kit):
+              return "" if cfg["kits"][kit]["toolchain"] == "android" else cfg["kits"][kit].get("container", "")
+
+          matrix = {"include": [{"kit": k, "runs_on": labels(os.environ["RUNNER_" + k.upper()]),
+                                 "container": container(k)}
                                 for k in selected]}
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               out.write("matrix=" + json.dumps(matrix) + "\n")
@@ -105,8 +132,56 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
     runs-on: ${{ fromJSON(matrix.runs_on) }}
-    timeout-minutes: 120
+    container: ${{ matrix.container }}
+    # The GPL FFmpeg builds about twenty more parts, x265 three times.
+    timeout-minutes: ${{ inputs.license == 'gpl' && 300 || 120 }}
     steps:
+      # The same preparation as the ffmpeg job of kit.yml.
+      - name: Prepare the container
+        if: matrix.container != ''
+        shell: bash
+        env:
+          PYTHON_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-unknown-linux-gnu-install_only.tar.gz
+          PYTHON_SHA256: a945427411dc6851a1393533b74a4a1ac434321ae397f2ec69897a9b4fde032b
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          if [ "$RUNNER_KIND" != github-hosted ]; then
+            echo "::error::A container kit needs a GitHub-hosted runner, but this runner is $RUNNER_KIND."
+            exit 1
+          fi
+          if [ "$(uname -m)" != aarch64 ]; then
+            echo "::error::The pinned Python 3.12 of the container is for aarch64, but this machine is $(uname -m)."
+            exit 1
+          fi
+          # Written directly in the script, so the runner does not translate it.
+          host_temp='${{ runner.temp }}'
+          if [ "$host_temp" != "$RUNNER_TEMP" ]; then
+            if [ -e "$host_temp" ] && [ ! -L "$host_temp" ]; then
+              echo "::error::$host_temp exists in the container, so it cannot link to $RUNNER_TEMP."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$host_temp")"
+            ln -sfn "$RUNNER_TEMP" "$host_temp"
+            echo "Linked $host_temp to $RUNNER_TEMP."
+          fi
+          df -h /
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> "$GITHUB_ENV"
+          # sudo drops DEBIAN_FRONTEND, so set the debconf frontend as well.
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends sudo git ca-certificates curl xz-utils zstd
+          curl -fsSL --retry 3 -o /tmp/python.tar.gz "$PYTHON_URL"
+          echo "$PYTHON_SHA256  /tmp/python.tar.gz" | sha256sum -c -
+          mkdir -p /opt/python3.12
+          tar -xzf /tmp/python.tar.gz -C /opt/python3.12 --strip-components=1
+          rm /tmp/python.tar.gz
+          # The workflow steps call "python".
+          [ -e /opt/python3.12/bin/python ] || ln -s python3 /opt/python3.12/bin/python
+          /opt/python3.12/bin/python --version
+          echo /opt/python3.12/bin >> "$GITHUB_PATH"
+          echo "QTCI_CONTAINER=true" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           # The build runs third-party code (FFmpeg and its parts, pip
@@ -114,6 +189,7 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-python@v7
+        if: matrix.container == ''
         with:
           python-version: "3.12"
 
@@ -123,7 +199,13 @@ jobs:
         env:
           QT_VERSION: ${{ inputs.qt_version }}
           KIT: ${{ matrix.kit }}
-        run: python tools/qtci.py plan --qt-version "$QT_VERSION" --kit "$KIT" --state "$RUNNER_TEMP/state"
+          LICENSE: ${{ inputs.license }}
+          # The plan of an Android kit asks the GitHub API for the head of
+          # android_openssl; without a token, the API limits shared runners.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python tools/qtci.py plan --qt-version "$QT_VERSION" --kit "$KIT" \
+            --ffmpeg-license "$LICENSE" --state "$RUNNER_TEMP/state"
 
       - uses: ./.github/actions/build-ffmpeg
         with:
@@ -131,6 +213,7 @@ jobs:
           toolchain: ${{ steps.plan.outputs.toolchain }}
           cache-key: ${{ steps.plan.outputs.ffmpeg_key }}
           out: ${{ runner.temp }}/ffmpeg
+          license: ${{ inputs.license }}
 
       - name: Make the release files
         shell: bash
@@ -142,7 +225,7 @@ jobs:
       - name: Upload the release files
         uses: actions/upload-artifact@v7
         with:
-          name: ffmpeg-release-${{ matrix.kit }}
+          name: ffmpeg-release-${{ inputs.license }}-${{ matrix.kit }}
           path: dist
           overwrite: true
           compression-level: 0
@@ -161,7 +244,7 @@ jobs:
       - name: Download the release files
         uses: actions/download-artifact@v8
         with:
-          pattern: ffmpeg-release-*
+          pattern: ffmpeg-release-${{ inputs.license }}-*
           merge-multiple: true
           path: dist
 
@@ -171,6 +254,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          LICENSE: ${{ inputs.license }}
         run: |
           # The select job checked the tag; check it again before gh uses it.
           if ! [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
@@ -180,18 +264,37 @@ jobs:
           # The release stays a draft until every file is uploaded, so that
           # nobody sees FFmpeg without its source. A published release that
           # this run updates becomes a draft for the time of the uploads.
+          # One release has the FFmpeg of one license, and nothing else (no
+          # Qt kits): its notes start with "LGPL FFmpeg" or "GPL FFmpeg".
+          check_release_license() {
+            local body prefix
+            body=$(gh release view "$RELEASE_TAG" --json body --jq .body)
+            prefix="LGPL FFmpeg"
+            if [ "$LICENSE" = gpl ]; then prefix="GPL FFmpeg"; fi
+            if [[ "$body" != "$prefix"* ]]; then
+              echo "::error::The notes of the release $RELEASE_TAG do not start with \"$prefix\", so it is not a $LICENSE FFmpeg release. Use another release_tag."
+              exit 1
+            fi
+          }
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            check_release_license
             if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" != true ]; then
               gh release edit "$RELEASE_TAG" --draft=true
             fi
           else
-            notes="LGPL FFmpeg built by vivace-qt-build. Each archive has its license files in licenses/, and each <archive>-source.tar has the sources and the build scripts. Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            if [ "$LICENSE" = gpl ]; then
+              notes="GPL FFmpeg (GPL 3 or later) built by vivace-qt-build, with x264, x265, libvpx, libaom, SVT-AV1, and more. You may give an archive to others only with its source, which is in the <archive>-source.tar next to it, with the build scripts. Each archive has its license files in licenses/. Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            else
+              notes="LGPL FFmpeg built by vivace-qt-build. Each archive has its license files in licenses/, and each <archive>-source.tar has the sources and the build scripts. Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            fi
             # --target tags the commit that this run built.
             gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" \
               --title "FFmpeg ($RELEASE_TAG)" --notes "$notes" \
               || gh release view "$RELEASE_TAG" > /dev/null
           fi
-          # Also when the first view failed for another reason than "not found".
+          # Also when the first view failed for another reason than "not
+          # found", or another run created the release first.
+          check_release_license
           if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" != true ]; then
             gh release edit "$RELEASE_TAG" --draft=true
           fi
