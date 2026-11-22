@@ -85,7 +85,7 @@ if [ "$FF_TARGET" = android ]; then
     : "${ANDROID_NDK:?}" "${ANDROID_ABI:?}" "${ANDROID_API:?}"
     case "$ANDROID_ABI" in
         arm64-v8a) ARCH=aarch64; CPU=armv8-a; TRIPLE=aarch64-linux-android ;;
-        x86_64)    ARCH=x86_64;  CPU=x86-64;  TRIPLE=x86_64-linux-android ;;
+        x86_64)    ARCH=x86_64;  CPU="x86-64";  TRIPLE=x86_64-linux-android ;;
         *) echo "unsupported ABI: $ANDROID_ABI" >&2; exit 2 ;;
     esac
     TOOLCHAIN="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64"
@@ -422,7 +422,7 @@ if [ -n "${X265_SRC:-}" ]; then
         if [ "$FF_TARGET" = macos ]; then
             libtool -static -o libx265-all.a libx265.a libx265_main10.a libx265_main12.a
         else
-            ar_tool=ar
+            ar_tool="ar"
             if [ "$FF_TARGET" = android ]; then ar_tool="$TOOLCHAIN/bin/llvm-ar"; fi
             printf 'CREATE libx265-all.a\nADDLIB libx265.a\nADDLIB libx265_main10.a\nADDLIB libx265_main12.a\nSAVE\nEND\n' |
                 "$ar_tool" -M
