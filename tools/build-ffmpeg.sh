@@ -490,8 +490,15 @@ if [ -n "${SVTAV1_SRC:-}" ]; then
     else
         svt_cpuinfo=(-DUSE_CPUINFO=OFF)
     fi
-    cmake_part svtav1 "$SVTAV1_SRC" -DBUILD_APPS=OFF -DBUILD_DEC=OFF -DBUILD_TESTING=OFF \
-        -DSVT_AV1_LTO=OFF "${svt_cpuinfo[@]}"
+    # With clang on Linux and Android, the SVT-AV1 CMake script sets CMAKE_AR
+    # and CMAKE_RANLIB to the names llvm-ar and llvm-ranlib, without a path,
+    # when it finds these tools. For Android it finds them in the NDK, which
+    # is not on PATH, so the subshell adds the NDK tools to PATH.
+    (
+        if [ "$FF_TARGET" = android ]; then export PATH="$TOOLCHAIN/bin:$PATH"; fi
+        cmake_part svtav1 "$SVTAV1_SRC" -DBUILD_APPS=OFF -DBUILD_DEC=OFF -DBUILD_TESTING=OFF \
+            -DSVT_AV1_LTO=OFF "${svt_cpuinfo[@]}"
+    )
 fi
 
 if [ -n "${LIBWEBP_SRC:-}" ]; then
