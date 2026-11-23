@@ -468,8 +468,25 @@ fi
 
 if [ -n "${SVTAV1_SRC:-}" ]; then
     # SVT-AV1 (BSD), the AV1 encoder only.
+    # On x86, SVT-AV1 finds the SIMD instruction sets of the CPU only with
+    # cpuinfo; without it, the encoder uses C code only. Its CMake script
+    # downloads cpuinfo, which the disconnected build forbids, so the cpuinfo
+    # part gives the same source. CPUINFO_LOG_TO_STDIO keeps cpuinfo from
+    # linking the Android liblog, which the SVT-AV1 .pc file does not name.
+    # On arm64, SVT-AV1 reads the CPU features itself, and does not use
+    # cpuinfo.
+    if [ "$x86" = 1 ]; then
+        if [ -z "${CPUINFO_SRC:-}" ]; then
+            echo "SVT-AV1 on x86 needs the cpuinfo part, which the recipe does not have." >&2
+            exit 1
+        fi
+        svt_cpuinfo=(-DUSE_CPUINFO=LOCAL -DFETCHCONTENT_SOURCE_DIR_CPUINFO="$CPUINFO_SRC"
+                     -DCPUINFO_LOG_TO_STDIO=ON)
+    else
+        svt_cpuinfo=(-DUSE_CPUINFO=OFF)
+    fi
     cmake_part svtav1 "$SVTAV1_SRC" -DBUILD_APPS=OFF -DBUILD_DEC=OFF -DBUILD_TESTING=OFF \
-        -DSVT_AV1_LTO=OFF
+        -DSVT_AV1_LTO=OFF "${svt_cpuinfo[@]}"
 fi
 
 if [ -n "${LIBWEBP_SRC:-}" ]; then

@@ -1164,6 +1164,8 @@ FFMPEG_SOURCE_PARTS = (
     ("libvpx", "libvpx (BSD-3-Clause), linked statically", "LIBVPX_SRC"),
     ("libaom", "libaom (BSD-2-Clause), linked statically", "LIBAOM_SRC"),
     ("svtav1", "SVT-AV1 (BSD-3-Clause-Clear), linked statically", "SVTAV1_SRC"),
+    ("cpuinfo", "cpuinfo (BSD-2-Clause), linked statically into SVT-AV1 on x86_64",
+     "CPUINFO_SRC"),
     ("libwebp", "libwebp (BSD-3-Clause), linked statically", "LIBWEBP_SRC"),
     ("openjpeg", "OpenJPEG (BSD-2-Clause), linked statically", "OPENJPEG_SRC"),
     ("xvid", "Xvid (GPL-2.0-or-later), linked statically", "XVID_SRC"),

@@ -588,6 +588,13 @@
           "PATENTS.md"
         ]
       },
+      "cpuinfo": {
+        "version": "e649baaa95efeb61517c06cc783287d4942ffe0e",
+        "sha256": "f89abf172b93d75a79a5456fa778a401ab2fc4ef84d538f5c4df7c6938591c6f",
+        "url": "https://github.com/1480c1/cpuinfo/archive/{version}.tar.gz",
+        "file": "cpuinfo-{version}.tar.gz",
+        "license": "LICENSE"
+      },
       "libwebp": {
         "version": "1.6.0",
         "sha256": "e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564",
@@ -965,7 +972,7 @@
         "gcc_64": "linux-x64",
         "macos": "macos-arm64"
       },
-      "_gpl": "The GPL FFmpeg: the Build FFmpeg workflow with license gpl builds it for the kits in gpl.release, and releases it on its own. No Qt kit contains it: the kits use the LGPL FFmpeg, and qtci.py setup-deps (the stage jobs) refuses a GPL recipe and a GPL FFmpeg. The recipe of a kit adds gpl.parts and gpl.configure to the lists above, and gpl.checks to its checks. --extra-libs=-lm: FFmpeg's configure checks libsoxr and libxvid (static, without .pc files) without libm. --enable-version3 makes it GPL 3 or later, which OpenSSL 3 (Linux) needs; the Apache-2.0 license of mbedtls (inside SRT) is also compatible with the GPL 3 only (mbedtls is Apache-2.0 OR GPL-2.0-or-later). The build fails unless FFmpeg reports GPL 3 or later. No option may enable nonfree code. Linux uses the FreeType of the system, which libaribcaption already links; the other targets build it. There is no msvc entry: the script builds the parts with autotools, meson, and CMake only, and xvid, Theora, and zimg have only Visual Studio projects for MSVC, and programs built with MSVC can use the MinGW DLLs. extra_licenses names more files of a part that the package must contain, for example its patent grant. mingw builds zlib as a part, as msvc does, and --enable-zlib stops the build if FFmpeg does not find it. So the source archive has the source of every library that the GPL FFmpeg links statically, except the runtime libraries of the compiler (System Libraries, GPL v3 section 1): those of MinGW, and the C++ runtime of the Android NDK.",
+      "_gpl": "The GPL FFmpeg: the Build FFmpeg workflow with license gpl builds it for the kits in gpl.release, and releases it on its own. No Qt kit contains it: the kits use the LGPL FFmpeg, and qtci.py setup-deps (the stage jobs) refuses a GPL recipe and a GPL FFmpeg. The recipe of a kit adds gpl.parts and gpl.configure to the lists above, and gpl.checks to its checks. --extra-libs=-lm: FFmpeg's configure checks libsoxr and libxvid (static, without .pc files) without libm. --enable-version3 makes it GPL 3 or later, which OpenSSL 3 (Linux) needs; the Apache-2.0 license of mbedtls (inside SRT) is also compatible with the GPL 3 only (mbedtls is Apache-2.0 OR GPL-2.0-or-later). The build fails unless FFmpeg reports GPL 3 or later. No option may enable nonfree code. Linux uses the FreeType of the system, which libaribcaption already links; the other targets build it. There is no msvc entry: the script builds the parts with autotools, meson, and CMake only, and xvid, Theora, and zimg have only Visual Studio projects for MSVC, and programs built with MSVC can use the MinGW DLLs. extra_licenses names more files of a part that the package must contain, for example its patent grant. cpuinfo is the source that the CMake script of SVT-AV1 3.0.2 downloads (its FetchContent pin, here as the GitHub tar.gz of the same commit); only the x86 targets list it, because SVT-AV1 on arm64 reads the CPU features itself (build-ffmpeg.sh sets USE_CPUINFO=OFF there). The android list has it for android_x86_64, so the android_arm64_v8a package also has its source. mingw builds zlib as a part, as msvc does, and --enable-zlib stops the build if FFmpeg does not find it. So the source archive has the source of every library that the GPL FFmpeg links statically, except the runtime libraries of the compiler (System Libraries, GPL v3 section 1): those of MinGW, and the C++ runtime of the Android NDK.",
       "gpl": {
         "license": "COPYING.GPLv3",
         "release": {
@@ -985,6 +992,7 @@
             "libvpx",
             "libaom",
             "svtav1",
+            "cpuinfo",
             "libwebp",
             "openjpeg",
             "xvid",
@@ -1009,6 +1017,7 @@
             "libvpx",
             "libaom",
             "svtav1",
+            "cpuinfo",
             "libwebp",
             "openjpeg",
             "xvid",
@@ -1079,6 +1088,7 @@
             "libvpx",
             "libaom",
             "svtav1",
+            "cpuinfo",
             "libwebp",
             "openjpeg",
             "xvid",

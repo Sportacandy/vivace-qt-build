@@ -432,6 +432,7 @@ The parts of the GPL FFmpeg, linked statically into the FFmpeg libraries:
 | libvpx | BSD-3-Clause | `libvpx` and `libvpx-vp9` encoders |
 | libaom | BSD-2-Clause | `libaom-av1` encoder |
 | SVT-AV1 | BSD-3-Clause-Clear | `libsvtav1` encoder |
+| cpuinfo (x86_64 only) | BSD-2-Clause | The x86 instruction sets of the CPU for SVT-AV1. On arm64, SVT-AV1 does not use it. |
 | libwebp | BSD-3-Clause | `libwebp` encoder |
 | OpenJPEG | BSD-2-Clause | `libopenjpeg` encoder (JPEG 2000) |
 | Xvid | GPL-2.0-or-later | `libxvid` encoder (MPEG-4 Part 2) |
