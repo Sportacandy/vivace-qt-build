@@ -288,10 +288,15 @@ if [ "$FF_TARGET" = android ]; then
 fi
 
 # Copies a source tree into the work directory, for the parts that build in
-# their source tree or change it (autogen.sh).
+# their source tree or change it (autogen.sh). On Windows, cp makes a copy of
+# the target for a symbolic link, from the destination tree, where the target
+# can be missing still (zimg doc/example/misc). -L copies the targets from the
+# source tree.
 copy_source() {  # <name> <source>
+    local deref=()
+    if [ "$WINDOWS" = 1 ]; then deref=(-L); fi
     rm -rf "${WORK:?}/$1-src"
-    cp -R "$(unix_path "$2")" "$WORK/$1-src" || exit 1
+    cp -R ${deref[@]+"${deref[@]}"} "$(unix_path "$2")" "$WORK/$1-src" || exit 1
     printf '%s\n' "$WORK/$1-src"
 }
 
