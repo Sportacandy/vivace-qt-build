@@ -1050,6 +1050,12 @@ GPL FFmpeg:
   libavfilter. The NDK advises one C++ runtime per application, because
   each copy has its own state. These parts have C interfaces, and FFmpeg
   passes no C++ objects or exceptions between its libraries.
+- On Windows, `build-ffmpeg.sh` copies the source of Xvid, Theora, LAME,
+  zimg, and libass with `cp -L`, so each symbolic link becomes a copy of its
+  target. A new source version can have a link that has no target, that
+  points to one of its parent directories, or that points outside the
+  source tree.
+  The copy then fails, or copies files that the build does not need.
 
 Build results:
 
