@@ -658,13 +658,19 @@ if [ -n "${SRT_SRC:-}" ]; then
     # keep the order. Other absolute archives are runtime libraries of the
     # compiler (with the NDK, libclang_rt.builtins), which the compiler links
     # anyway; their paths are of the build machine, so they are removed.
-    sed -E -i.bak -e "s#$DEPS_MIXED/lib/lib([A-Za-z0-9_+-]+)\.a#-l\1#g" \
-        -e "s#$DEPS/lib/lib([A-Za-z0-9_+-]+)\.a#-l\1#g" "$DEPS/lib/pkgconfig/srt.pc"
+    # The SRT CMake script finds the archives as <deps>/lib/../lib/libX.a.
+    sed -E -i.bak -e "s#$DEPS_MIXED/lib/(\.\./lib/)*lib([A-Za-z0-9_+-]+)\.a#-l\2#g" \
+        -e "s#$DEPS/lib/(\.\./lib/)*lib([A-Za-z0-9_+-]+)\.a#-l\2#g" "$DEPS/lib/pkgconfig/srt.pc"
     for _ in 1 2; do
         sed -E -i.bak 's#(^|[[:space:]])([A-Za-z]:)?/[^[:space:]]*\.a([[:space:]]|$)#\1\3#g' \
             "$DEPS/lib/pkgconfig/srt.pc"
     done
     rm -f "$DEPS/lib/pkgconfig/srt.pc.bak"
+    if ! grep -Eq '(^|[[:space:]])-lmbedcrypto([[:space:]]|$)' "$DEPS/lib/pkgconfig/srt.pc"; then
+        echo "srt.pc does not name Mbed TLS (-lmbedcrypto), which libsrt needs:" >&2
+        cat "$DEPS/lib/pkgconfig/srt.pc" >&2
+        exit 1
+    fi
     # srt.pc copies the implicit libraries of the C++ compiler. Android needs
     # the static C++ runtime instead. MinGW must not link libgcc_s (a DLL) or
     # the GNU libiconv of MinGW, and Mbed TLS needs bcrypt and Winsock. Each
