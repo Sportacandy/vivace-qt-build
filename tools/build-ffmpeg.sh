@@ -259,6 +259,10 @@ PKG_CONFIG_PATH="$DEPS_MIXED/lib/pkgconfig"
 if [ "$WINDOWS" = 1 ]; then
     # Windows pkg-config builds take ";" lists; MSYS2 pkgconf takes either.
     PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
+    # MSYS2 changes this path to D:/... for a Windows program, for example
+    # meson or cmake. These programs then run the MSYS2 pkgconf, which reads
+    # the ":" in D:/... as a list separator. This keeps the MSYS2 path.
+    export MSYS2_ENV_CONV_EXCL=PKG_CONFIG_PATH
 fi
 if [ "$FF_TARGET" = android ]; then
     # Cross build: the .pc files of the Linux host are not for Android.
