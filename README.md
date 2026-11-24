@@ -1056,6 +1056,16 @@ GPL FFmpeg:
   points to one of its parent directories, or that points outside the
   source tree.
   The copy then fails, or copies files that the build does not need.
+- On Android, `libopenjp2.pc` names the compiler flag `-pthread` in
+  `Libs.private`, and the FFmpeg `.pc` files can copy it. A link through
+  clang accepts the flag. A tool that gives the `Libs.private` items of
+  `pkg-config --static` directly to the linker (`ld.lld`) fails.
+- On Windows, `build-ffmpeg.sh` sets `MSYS2_ENV_CONV_EXCL` to
+  `PKG_CONFIG_PATH`, so that meson and CMake give the MSYS2 pkgconf a path
+  that it can read. This replaces any `MSYS2_ENV_CONV_EXCL` that the caller
+  set. A `pkg-config` that is a Windows program cannot read this path. The
+  build uses the MSYS2 pkgconf, which comes before the Windows directories
+  in `PATH`.
 
 Build results:
 
