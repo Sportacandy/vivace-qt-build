@@ -513,6 +513,11 @@ if [ -n "${OPENJPEG_SRC:-}" ]; then
     # OpenJPEG (BSD), JPEG 2000.
     cmake_part openjpeg "$OPENJPEG_SRC" -DBUILD_CODEC=OFF -DBUILD_TESTING=OFF \
         -DBUILD_STATIC_LIBS=ON
+    # The OpenJPEG CMake script writes -l before each link item in
+    # Libs.private, also before a flag: the thread flag -pthread of the NDK
+    # becomes -l-pthread, which the linker reads as a library name.
+    sed -E -i.bak 's/(^|[[:space:]])-l-/\1-/g' "$DEPS/lib/pkgconfig/libopenjp2.pc"
+    rm -f "$DEPS/lib/pkgconfig/libopenjp2.pc.bak"
 fi
 
 if [ -n "${XVID_SRC:-}" ]; then
